@@ -1,0 +1,62 @@
+# cargo-deny configuration: run `cargo deny check` (CI runs it on every PR).
+# See https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+# Only the platforms solrac-voice is built for, with Solrac. Without a list, cargo-deny checks
+# every platform's dependencies.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+]
+
+[advisories]
+ignore = [
+    # sherpa-onnx's build script downloads its prebuilt library with ureq 2 and unpacks it with
+    # tar, or with zip 2 for iOS. They run only while building, none of their code or data is
+    # in the program, and sherpa-onnx-sys requires these major versions. CI downloads the
+    # library itself and checks its SHA-256 before the build script sees it (ci.yml). Look at
+    # them again with each sherpa-onnx upgrade. (The same as Solrac's, cjus/chessgui#59.)
+    { id = "RUSTSEC-2026-0367", reason = "zip 2 unpacks only iOS archives in sherpa-onnx-sys's build script; solrac-voice isn't built for iOS" },
+    { id = "RUSTSEC-2026-0368", reason = "zip 2 unpacks only iOS archives in sherpa-onnx-sys's build script; solrac-voice isn't built for iOS" },
+    { id = "RUSTSEC-2026-0369", reason = "zip 2 unpacks only iOS archives in sherpa-onnx-sys's build script; solrac-voice isn't built for iOS" },
+]
+
+[licenses]
+# Our own code is `MIT OR Apache-2.0`, so every crate it depends on must be permissive. (The
+# program as built is GPL-3.0-or-later because of eSpeak NG, inside sherpa-onnx's prebuilt
+# library, which no crate's licence shows: README, "Licence".)
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "ISC",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.9
+unused-allowed-license = "allow"
+
+# The root certificates ureq bundles (data, under CDLA-Permissive-2.0), only in sherpa-onnx's
+# build script: they check the TLS connection that downloads its library while building, and
+# are not part of the program.
+[[licenses.exceptions]]
+crate = "webpki-roots"
+allow = ["CDLA-Permissive-2.0"]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+# The Chess Node Protocol's types and conformance tests, from their own (private) repository.
+allow-git = ["https://github.com/cjus/chess-node-protocol"]

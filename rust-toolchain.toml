@@ -1,0 +1,5 @@
+# Pin the compiler so builds and lints are reproducible on every machine.
+# The version Solrac pins. Bump it deliberately in its own PR.
+[toolchain]
+channel = "1.97.1"
+components = ["rustfmt", "clippy"]
