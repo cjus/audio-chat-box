@@ -1,0 +1,23 @@
+# What a player says, for the transcription bake-off (examples/bakeoff.rs).
+# One phrase a line: its kind (move, question or everyday), what is said, and what should be
+# heard, separated by "|". Clips are numbered by line, comments and blank lines not counted.
+move|e4|e4
+move|d4|d4
+move|knight to f3|knight to f3
+move|bishop takes c6|bishop takes c6
+move|castle kingside|castle kingside
+move|pawn to d5|pawn to d5
+move|queen to h5 check|queen to h5 check
+move|rook to e1|rook to e1
+move|e takes d5|e takes d5
+move|knight b1 to c3|knight b1 to c3
+question|what's the plan in this opening?|what's the plan in this opening?
+question|show me the board from black's side|show me the board from black's side
+question|start a new game|start a new game
+question|why is knight f6 better than bishop e7 here?|why is knight f6 better than bishop e7 here?
+question|can you show me the main line of the Ruy Lopez and explain why white plays bishop b5 instead of bishop c4?|can you show me the main line of the ruy lopez and explain why white plays bishop b5 instead of bishop c4?
+everyday|can you explain that again more slowly?|can you explain that again more slowly?
+everyday|thanks, that was really helpful|thanks, that was really helpful
+everyday|I think I'll check my email after this game|i think i'll check my email after this game
+everyday|the night is young and the king of the castle is tired|the night is young and the king of the castle is tired
+everyday|zoom in a little and turn the camera to the left|zoom in a little and turn the camera to the left

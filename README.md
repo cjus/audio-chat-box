@@ -39,7 +39,8 @@ It then reads CNP messages, one JSON line each, and answers:
 second, and a sentence is read in under one.
 
 `cargo run --release --example say`, `hear` and `bakeoff` read text aloud to a WAV file, hear
-WAV files, and compare transcription models, for measuring.
+WAV files, and compare transcription models, for measuring. `tools/bakeoff/make-clips.sh` makes
+the bake-off's recordings (macOS).
 
 ## Licence
 
