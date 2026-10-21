@@ -1,0 +1,53 @@
+[package]
+name = "solrac-voice"
+description = "Solrac's voice as a program of its own: Kokoro reads text aloud and Parakeet hears speech, on this computer, behind the Chess Node Protocol's voice domain."
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+# Our own code. The program as built links eSpeak NG (GPL-3.0-or-later) through sherpa-onnx,
+# so the `solrac-voice` binary as a whole is GPL-3.0-or-later (README, "Licence").
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/cjus/solrac-voice"
+publish = false
+
+[dependencies]
+# The Chess Node Protocol's types (`MIT OR Apache-2.0`), pinned to a commit on its `main`.
+cnp = { git = "https://github.com/cjus/chess-node-protocol", rev = "314286da4f660b3ce50dfc4789fb82446b15fd53" }
+# sherpa-onnx (Apache-2.0), k2-fsa's speech toolkit: Kokoro and Parakeet through ONNX
+# Runtime. Pinned exactly: its build script downloads the prebuilt library of the same
+# version (about 20 MB, with ONNX Runtime and eSpeak NG linked in) and links it statically. CI
+# checks that library's SHA-256 (ci.yml): bump the version there too.
+sherpa-onnx = "=1.13.8"
+# Reads WAV files into samples, and writes them.
+hound = "3.5.1"
+# Audio travels as base64 in CNP's messages (spec, 8).
+base64 = "0.22.1"
+# Downloading the models from the PNX Studios CDN: an HTTP client with rustls, the SHA-256
+# the download is checked with, and the archive's format (tar, bzip2, the versions
+# sherpa-onnx's build script uses). The download runs on a Tokio runtime of its own.
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
+sha2 = "0.10.9"
+tar = "0.4.46"
+bzip2 = "0.4.4"
+tokio = { version = "1.53", features = ["rt", "time"] }
+
+[dev-dependencies]
+serde_json = "1.0"
+# The protocol's conformance sessions, run against this program.
+cnp-conformance = { git = "https://github.com/cjus/chess-node-protocol", rev = "314286da4f660b3ce50dfc4789fb82446b15fd53" }
+
+[lints.rust]
+missing_docs = "deny"
+unsafe_code = "forbid"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+
+# ONNX Runtime does the heavy work in its own (always optimised) code; ours only moves samples
+# and messages. Optimise dependencies in debug builds anyway, so `cargo run` is usable.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

@@ -1,0 +1,112 @@
+# Checks pull requests that are ready for review. One job on Linux, to keep the account's
+# Actions minutes low (they ran out in October 2026, cjus/chessgui#73):
+#
+# - One job, `CI`: GitHub bills each job rounded up to a whole minute.
+# - Draft pull requests aren't checked. A PR is checked when it is marked ready, and again on
+#   each push after that.
+# - A pull request that changes only Markdown skips the build and passes in seconds.
+# - No run after a merge: the PR's run already checked the merge result. Run it by hand
+#   (workflow_dispatch) to check `main`.
+# - Only `main` saves the build cache.
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: CI
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A pull request's commit is the merge of the PR into main, so its first parent is
+          # main: two commits are enough to see what the PR changes.
+          fetch-depth: 2
+      - name: Decide what to check
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            # Through a file, not a pipe: with `pipefail`, `grep -q` stopping early could fail
+            # `git diff` and pass for "documentation only".
+            git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed"
+            cat "$RUNNER_TEMP/changed"
+            if grep -qvE '\.md$' "$RUNNER_TEMP/changed"; then build=true; else build=false; fi
+          else
+            build=true
+          fi
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "Build, test and check licences: $build."
+      # The Chess Node Protocol's crates live in a private repository: fetch them over SSH with
+      # a read-only deploy key (cjus/chessgui#105). The key's comment is the repository's
+      # address, which the agent uses to pick it for that repository.
+      - name: Check the protocol's deploy key is set
+        if: steps.scope.outputs.build == 'true'
+        env:
+          KEY: ${{ secrets.CNP_DEPLOY_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::error::The CNP_DEPLOY_KEY secret is missing, so CI can't fetch the cnp crate from cjus/chess-node-protocol (private). See cjus/chessgui#105."
+            exit 1
+          fi
+      - uses: webfactory/ssh-agent@v0.9.1
+        if: steps.scope.outputs.build == 'true'
+        with:
+          ssh-private-key: ${{ secrets.CNP_DEPLOY_KEY }}
+      - name: Install the toolchain from rust-toolchain.toml
+        if: steps.scope.outputs.build == 'true'
+        run: rustup toolchain install
+      # sherpa-onnx's build script downloads its prebuilt library from GitHub without checking
+      # it. Download it here instead, check it against the SHA-256 sherpa-onnx's release
+      # publishes, and hand it to the build script. Bump the version and the checksum with
+      # the sherpa-onnx pin in Cargo.toml.
+      - name: Fetch sherpa-onnx's prebuilt library and check it
+        if: steps.scope.outputs.build == 'true'
+        env:
+          ARCHIVE: sherpa-onnx-v1.13.8-linux-x64-static-lib.tar.bz2
+          SHA256: e1fdc5b67530e15741ef897fa5ffff297056f3bf0c6d829a27af9225a4c4b5a6
+        run: |
+          mkdir -p "$RUNNER_TEMP/sherpa-onnx"
+          curl -sSfL -o "$RUNNER_TEMP/sherpa-onnx/$ARCHIVE" "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/$ARCHIVE"
+          echo "$SHA256  $RUNNER_TEMP/sherpa-onnx/$ARCHIVE" | sha256sum --check
+          echo "SHERPA_ONNX_ARCHIVE_DIR=$RUNNER_TEMP/sherpa-onnx" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@v2
+        if: steps.scope.outputs.build == 'true'
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Format
+        if: steps.scope.outputs.build == 'true'
+        run: cargo fmt --all --check
+      - name: Clippy
+        if: steps.scope.outputs.build == 'true'
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Tests (the protocol's conformance sessions included)
+        if: steps.scope.outputs.build == 'true'
+        run: cargo test --locked
+      - name: Docs
+        if: steps.scope.outputs.build == 'true'
+        run: cargo doc --no-deps --document-private-items --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - uses: taiki-e/install-action@v2
+        if: steps.scope.outputs.build == 'true'
+        with:
+          tool: cargo-deny
+      - name: Check licences, advisories, bans and sources
+        if: steps.scope.outputs.build == 'true'
+        run: cargo deny check
