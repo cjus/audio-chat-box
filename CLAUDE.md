@@ -12,7 +12,10 @@ is Solrac. Owner: Carlos.
    sherpa-onnx, so Solrac must never link it: Solrac starts it and talks CNP to it. Nothing here
    may become a library Solrac depends on.
 2. **Our code is `MIT OR Apache-2.0`**; every crate it depends on is permissive (`deny.toml`).
-   The program as a whole is GPL-3.0-or-later (README, "Licence").
+   The program as a whole is GPL-3.0-or-later (README, "Licence"). Every copy of it goes with
+   `THIRD-PARTY-NOTICES.txt` (`tools/notices.sh`): the crates' licences, and those of the C and
+   C++ libraries in sherpa-onnx's prebuilt library, kept in `licences/`. Bumping the
+   sherpa-onnx pin means looking at those libraries again (`licences/README.md`).
 3. **Nothing but CNP on standard output** (spec, 3.1). Logs go to standard error.
 4. **The protocol is pinned** to a commit (`rev`) of `cjus/chess-node-protocol` in `Cargo.toml`,
    for both `cnp` and `cnp-conformance`. `tests/conformance.rs` runs every session that applies

@@ -54,3 +54,10 @@ The `solrac-voice` program as built links sherpa-onnx's prebuilt library, which 
 out words its lexicon doesn't have. So the program as a whole is
 [GPL-3.0-or-later](LICENSE-GPL-3.0), and its source is this repository. The models have licences
 of their own: Kokoro Apache-2.0, Parakeet CC-BY-4.0 (by NVIDIA).
+
+Every copy of the program goes with the notices of what it is built with:
+`tools/notices.sh` writes them to `target/licences/THIRD-PARTY-NOTICES.txt`. They are the
+crates' licences (with cargo-about 0.9: `cargo install --locked cargo-about@0.9.2 --features
+cli`), then those of the C and C++ libraries in sherpa-onnx's prebuilt library, which the
+archive doesn't carry, so they are kept in [`licences/`](licences/README.md) with where each
+came from.

@@ -21,6 +21,8 @@ unchanged, and a `NOTICE.txt` beside them on the CDN gives the same licences as 
 
 | What | Source | Licence |
 | --- | --- | --- |
-| sherpa-onnx's prebuilt static library: sherpa-onnx, ONNX Runtime and eSpeak NG | [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) release 1.13.8, checked by its SHA-256 in CI | Apache-2.0; ONNX Runtime MIT; eSpeak NG GPL-3.0-or-later, which makes the program as a whole GPL-3.0-or-later (README, "Licence") |
+| sherpa-onnx's prebuilt static library: sherpa-onnx, ONNX Runtime, eSpeak NG and ten smaller libraries (`licences/README.md` lists each, with its version, source and licence) | [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) release 1.13.8, checked by its SHA-256 in CI | Apache-2.0; ONNX Runtime MIT; eSpeak NG GPL-3.0-or-later, which makes the program as a whole GPL-3.0-or-later (README, "Licence"); the others MIT, BSD, Apache-2.0 or MPL-2.0 |
 
-The Rust crates it depends on are permissive, and `cargo deny check` keeps them so.
+The Rust crates it depends on are permissive, and `cargo deny check` keeps them so. Every
+licence notice they and the libraries above ask for is in `THIRD-PARTY-NOTICES.txt`, which
+`tools/notices.sh` writes.
