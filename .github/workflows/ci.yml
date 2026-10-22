@@ -74,7 +74,7 @@ jobs:
       # sherpa-onnx's build script downloads its prebuilt library from GitHub without checking
       # it. Download it here instead, check it against the SHA-256 sherpa-onnx's release
       # publishes, and hand it to the build script. Bump the version and the checksum with
-      # the sherpa-onnx pin in Cargo.toml.
+      # the sherpa-onnx pin in Cargo.toml (and the libraries' licences, licences/README.md).
       - name: Fetch sherpa-onnx's prebuilt library and check it
         if: steps.scope.outputs.build == 'true'
         env:

@@ -16,7 +16,8 @@ cnp = { git = "https://github.com/cjus/chess-node-protocol", rev = "314286da4f66
 # sherpa-onnx (Apache-2.0), k2-fsa's speech toolkit: Kokoro and Parakeet through ONNX
 # Runtime. Pinned exactly: its build script downloads the prebuilt library of the same
 # version (about 20 MB, with ONNX Runtime and eSpeak NG linked in) and links it statically. CI
-# checks that library's SHA-256 (ci.yml): bump the version there too.
+# checks that library's SHA-256 (ci.yml): bump the version there too, and look again at the
+# libraries inside it and their licences (licences/README.md).
 sherpa-onnx = "=1.13.8"
 # Reads WAV files into samples, and writes them.
 hound = "3.5.1"
