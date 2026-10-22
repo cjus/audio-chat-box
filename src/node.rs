@@ -825,16 +825,18 @@ impl Listening {
     }
 
     /// Takes the listen out of the node's records, before it is answered: then a new listen
-    /// may start.
+    /// may start. Only its own: once a cancel has answered it, the client may give its id to
+    /// a new request (spec, 4), whose records this mustn't take.
     fn forget(&self) {
-        self.listens
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(&self.id);
-        self.jobs
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(&self.id);
+        let mut listens = self.listens.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+        if jobs
+            .get(&self.id)
+            .is_some_and(|job| Arc::ptr_eq(job, &self.job))
+        {
+            jobs.remove(&self.id);
+            listens.remove(&self.id);
+        }
     }
 }
 
@@ -1378,6 +1380,64 @@ mod tests {
         node.request(&quick_listen(3));
         send_audio(&mut node, 3, None, true);
         assert!(written.response(3).result::<Listen>().is_ok());
+    }
+
+    /// A Parakeet that takes `pause` to hear anything.
+    struct SlowHearing {
+        pause: Duration,
+    }
+
+    impl Hearing for SlowHearing {
+        fn transcribe(&self, _speech: &Samples) -> Result<String, SpeechError> {
+            thread::sleep(self.pause);
+            Ok("Knight to f3.".to_string())
+        }
+    }
+
+    #[test]
+    fn a_cancelled_listen_leaves_a_new_listen_with_its_id_alone() {
+        let (mut node, written) = ready_node(Duration::ZERO);
+        let slow: Arc<dyn Hearing> = Arc::new(SlowHearing {
+            pause: Duration::from_millis(300),
+        });
+        node.hearing = Some(Arc::new(Slot::new(models::PARAKEET)));
+        let _ = node.hearing.as_ref().unwrap().ready.set(slow);
+        node.request(&quick_listen(2));
+        // An utterance that ends, which the listen's thread is still hearing when cancelled.
+        send_audio(&mut node, 2, Some(audio(0.9, 320)), false);
+        send_audio(&mut node, 2, Some(audio(0.0, 320)), false);
+        thread::sleep(Duration::from_millis(50));
+        let cancel = Notification {
+            method: "$/cancelRequest".to_string(),
+            params: Some(json!({"id": 2})),
+        };
+        node.notification(&cancel);
+        assert_eq!(
+            written.response(2).outcome.unwrap_err().code,
+            code::CANCELLED
+        );
+        // The id is free once answered (spec, 4): a new listen takes it.
+        node.request(&quick_listen(2));
+        // The first listen's thread finishes hearing, and ends, after the new one started.
+        thread::sleep(Duration::from_millis(500));
+        send_audio(&mut node, 2, None, true);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let answered = || {
+            written.messages().into_iter().any(|m| {
+                matches!(m, Message::Response(r)
+                    if r.id == Some(Id::from(2)) && r.outcome.is_ok())
+            })
+        };
+        while !answered() {
+            assert!(Instant::now() < deadline, "the new listen was forgotten");
+            thread::sleep(Duration::from_millis(5));
+        }
+        // And nothing heard by the cancelled listen was said.
+        assert!(
+            !notifications(&written)
+                .iter()
+                .any(|(m, _)| m == "voice/heard")
+        );
     }
 
     #[test]

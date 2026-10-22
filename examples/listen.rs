@@ -139,7 +139,9 @@ fn say(
                     samples,
                 };
                 let started = Instant::now();
-                let text = transcriber.transcribe(&speech).unwrap_or_else(|e| e.to_string());
+                let text = transcriber
+                    .transcribe(&speech)
+                    .unwrap_or_else(|e| e.to_string());
                 println!(
                     "{:6.2} s  heard {:.2}–{:.2} s in {:.2} s: {text:?}",
                     seconds(heard_to),
