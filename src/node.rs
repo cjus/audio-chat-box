@@ -9,6 +9,10 @@
 //!   params are `InvalidParams` whether or not the models are ready (spec, 8). Then the work is
 //!   done on a thread of its own, and the node keeps answering `ping` and cancels while Kokoro
 //!   reads.
+//! - **`voice/listen`** (spec, 8.5; cjus/chessgui#134): its params are checked as above, then
+//!   a thread of its own hears its audio as `voice/audio` brings it. Silero VAD finds each
+//!   utterance ([`listen`]), `voice/speechStarted` says it has begun, and once the speaker
+//!   pauses Parakeet hears it and `voice/heard` says what was said. One listen at a time.
 //! - **The models' progress:** `voice/modelState` at each new stage, and while downloading at
 //!   most once each [`PROGRESS_INTERVAL`].
 //!
@@ -28,6 +32,11 @@
 //! is dropped. Parakeet can't be stopped, so a cancelled transcription runs to its end (well
 //! under a second) with no one waiting for it.
 //!
+//! A cancelled listen stops taking audio, and its thread ends with it, dropping the
+//! utterance it was hearing: nothing it sends for that listen follows the cancel's answer,
+//! since each notification is written only if the listen hasn't been answered, under the same
+//! lock as the answer.
+//!
 //! ## Pitfalls
 //!
 //! - **Nothing but CNP on standard output** (spec, 3.1). sherpa-onnx and ONNX Runtime log to
@@ -36,11 +45,16 @@
 //!   threads, so each message is written whole under a lock.
 //! - **A model is ready before it says so.** It is stored first, then `ready` is sent, so a
 //!   client that acts on the notification finds it.
+//! - **Audio never waits.** The loop that reads the client's messages only decodes a listen's
+//!   audio and hands it to the listen's thread: it never transcribes. A loop that stopped
+//!   reading while Parakeet worked would fill the pipe, and the client writing the next audio
+//!   would wait for it.
 
 use std::collections::HashMap;
 use std::io::{self, BufRead, Cursor, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -53,13 +67,15 @@ use cnp::lifecycle::{
 };
 use cnp::stdio::{ReadError, read_message};
 use cnp::voice::{
-    AudioFormat, Model, ModelState, ModelStateChanged, ModelStateParams, Models, ModelsResult,
-    Speak, SpeakResult, Stage, Transcribe, TranscribeResult, VoiceCapabilities, Voices,
+    Audio, AudioFormat, AudioParams, Heard, HeardParams, Listen, ListenResult, Model, ModelState,
+    ModelStateChanged, ModelStateParams, Models, ModelsResult, Speak, SpeakResult, SpeechStarted,
+    SpeechStartedParams, Stage, Transcribe, TranscribeResult, VoiceCapabilities, Voices,
     VoicesResult,
 };
 use cnp::{Id, Message, Notification, Request, RequestMethod, Response, ResponseError, code};
 
 use crate::hear::{self, Transcriber};
+use crate::listen::{self, Detect, Detector, Event, Utterances};
 use crate::models::{self, LocalModel};
 use crate::speak::{self, DEFAULT_VOICE, SPEEDS, Speaker};
 use crate::{Samples, SpeechError};
@@ -92,6 +108,8 @@ pub struct Config {
     pub speech: Option<LocalModel>,
     /// The model to hear with, if the node hears.
     pub transcription: Option<LocalModel>,
+    /// The model that finds speech, if the node listens (with the model it hears with).
+    pub listening: Option<LocalModel>,
     /// Never download: a model that isn't in the models folder fails. For tests and
     /// computers without the network.
     pub offline: bool,
@@ -251,6 +269,20 @@ impl Job {
     }
 }
 
+/// The requests being worked on, by id.
+type Jobs = Arc<Mutex<HashMap<Id, Arc<Job>>>>;
+
+/// A piece of a listen's audio, for its thread.
+enum Chunk {
+    /// The next samples, at [`listen::SAMPLE_RATE`].
+    Samples(Vec<f32>),
+    /// The audio has ended.
+    End,
+}
+
+/// The listens taking audio, by id: where each one's audio goes.
+type Listens = Arc<Mutex<HashMap<Id, mpsc::Sender<Chunk>>>>;
+
 /// Where the session is in its lifecycle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum State {
@@ -269,7 +301,9 @@ struct Node {
     state: State,
     speech: Option<Arc<Slot<dyn Speech>>>,
     hearing: Option<Arc<Slot<dyn Hearing>>>,
-    jobs: Arc<Mutex<HashMap<Id, Arc<Job>>>>,
+    listening: Option<Arc<Slot<dyn Detect>>>,
+    jobs: Jobs,
+    listens: Listens,
 }
 
 /// Runs a CNP session until `exit` or the end of the input, and says whether the client shut
@@ -308,9 +342,11 @@ impl Node {
             output,
             speech: config.speech.map(|model| Arc::new(Slot::new(model))),
             hearing: config.transcription.map(|model| Arc::new(Slot::new(model))),
+            listening: config.listening.map(|model| Arc::new(Slot::new(model))),
             config,
             state: State::Starting,
             jobs: Arc::default(),
+            listens: Arc::default(),
         }
     }
 
@@ -355,6 +391,10 @@ impl Node {
                 Ok(()) => return,
                 Err(error) => Response::error(Some(id), error),
             },
+            (State::Running, Listen::NAME) => match self.listen(request) {
+                Ok(()) => return,
+                Err(error) => Response::error(Some(id), error),
+            },
             (State::Running, method) => error(
                 code::METHOD_NOT_FOUND,
                 &format!("{NAME} has no method {method}"),
@@ -363,14 +403,25 @@ impl Node {
         send(&self.output, response.into());
     }
 
-    /// Acts on a notification: only `$/cancelRequest` means anything here.
+    /// Acts on a notification: `$/cancelRequest`, and a listen's audio.
     fn notification(&mut self, notification: &Notification) {
-        if self.state != State::Running || !notification.is::<CancelRequest>() {
+        if self.state != State::Running {
+            return;
+        }
+        if notification.is::<Audio>() {
+            if let Ok(params) = notification.params::<Audio>() {
+                self.audio(params);
+            }
             return;
         }
         let Ok(params) = notification.params::<CancelRequest>() else {
             return;
         };
+        // A listen's thread ends when its audio stops coming.
+        self.listens
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&params.id);
         let job = self
             .jobs
             .lock()
@@ -381,8 +432,51 @@ impl Node {
         }
     }
 
+    /// Hands a piece of audio to its listen's thread. Audio for a listen the node doesn't
+    /// have is ignored, since the two can cross (spec, 8.5); audio that can't be read ends
+    /// the listen with `InvalidParams`.
+    fn audio(&self, params: AudioParams) {
+        let mut listens = self.listens.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(listen) = listens.get(&params.id) else {
+            return;
+        };
+        if let Some(audio) = &params.audio {
+            let samples = BASE64
+                .decode(audio.as_bytes())
+                .ok()
+                .and_then(|bytes| hear::samples_of_pcm_f32(&bytes, listen::SAMPLE_RATE).ok());
+            let Some(samples) = samples else {
+                listens.remove(&params.id);
+                drop(listens);
+                let job = self
+                    .jobs
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .remove(&params.id);
+                if let Some(job) = job {
+                    let why = invalid("the audio isn't whole pcmF32 samples in base64".to_string());
+                    job.stop.store(true, Ordering::Relaxed);
+                    job.answer(&self.output, Response::error(Some(params.id), why));
+                }
+                return;
+            };
+            // The thread has gone only once it has answered.
+            let _ = listen.send(Chunk::Samples(samples.samples));
+        }
+        if params.end
+            && let Some(listen) = listens.remove(&params.id)
+        {
+            let _ = listen.send(Chunk::End);
+        }
+    }
+
     /// Answers every request being worked on with `Cancelled` (a cancel, or `shutdown`).
     fn cancel_all(&mut self) {
+        // Their audio stops coming, which ends the listens' threads.
+        self.listens
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
         let jobs: Vec<_> = self
             .jobs
             .lock()
@@ -425,6 +519,7 @@ impl Node {
                 voice: Some(VoiceCapabilities {
                     speak: self.speech.is_some(),
                     transcribe: self.hearing.is_some(),
+                    listen: self.listening.is_some() && self.hearing.is_some(),
                     word_times: false,
                     formats: vec![AudioFormat::Wav, AudioFormat::PcmF32],
                 }),
@@ -447,6 +542,12 @@ impl Node {
             let load = |model: &LocalModel, folder: &Path| -> Result<Arc<dyn Hearing>, _> {
                 Ok(Arc::new(Transcriber::load(model, folder)?))
             };
+            spawn_prepare(Arc::clone(slot), dir.clone(), offline, &self.output, load);
+        }
+        if let Some(slot) = &self.listening {
+            let load = |model: &LocalModel, folder: &Path| -> Result<Arc<dyn Detect>, _> {
+                Ok(Arc::new(Detector::load(model, folder)?))
+            };
             spawn_prepare(Arc::clone(slot), dir, offline, &self.output, load);
         }
     }
@@ -454,8 +555,9 @@ impl Node {
     fn models(&self) -> ModelsResult {
         let speech = self.speech.as_ref().map(|slot| slot.listed());
         let hearing = self.hearing.as_ref().map(|slot| slot.listed());
+        let listening = self.listening.as_ref().map(|slot| slot.listed());
         ModelsResult {
-            models: speech.into_iter().chain(hearing).collect(),
+            models: speech.into_iter().chain(hearing).chain(listening).collect(),
         }
     }
 
@@ -510,10 +612,7 @@ impl Node {
             }
         };
         if let Some(language) = &params.language {
-            let primary = language.split('-').next().unwrap_or_default();
-            if !primary.eq_ignore_ascii_case(hear::LANGUAGE) {
-                return Err(unsupported("Parakeet hears English only"));
-            }
+            english_only(language)?;
         }
         let transcriber = self
             .hearing
@@ -536,6 +635,74 @@ impl Node {
         Ok(())
     }
 
+    /// Checks a `voice/listen` request and starts hearing its audio (see the
+    /// [module docs](self)).
+    fn listen(&self, request: &Request) -> Result<(), ResponseError> {
+        let params = request.params::<Listen>()?;
+        if params.format != AudioFormat::PcmF32 {
+            return Err(invalid(
+                "a listen's audio is pcmF32, the format that streams".to_string(),
+            ));
+        }
+        if params.sample_rate != listen::SAMPLE_RATE {
+            return Err(invalid(format!(
+                "{NAME} listens to {} samples a second",
+                listen::SAMPLE_RATE
+            )));
+        }
+        let settings = listen::Settings::from_millis(
+            params.end_silence_ms,
+            params.min_speech_ms,
+            params.max_speech_ms,
+        )
+        .map_err(invalid)?;
+        if let Some(language) = &params.language {
+            english_only(language)?;
+        }
+        if params.word_times {
+            return Err(unsupported("this node can't tell when each word is said"));
+        }
+        let (Some(listening), Some(hearing)) = (&self.listening, &self.hearing) else {
+            return Err(unsupported(
+                "this node was started without a listening model",
+            ));
+        };
+        let detector = listening.ready()?;
+        let hearing = hearing.ready()?;
+        let session = detector
+            .start(&settings)
+            .map_err(|error| internal(format!("the listening model failed: {error}")))?;
+        let (audio, chunks) = mpsc::channel();
+        {
+            let mut listens = self.listens.lock().unwrap_or_else(PoisonError::into_inner);
+            if !listens.is_empty() {
+                return Err(ResponseError::new(
+                    code::BUSY,
+                    format!("{NAME} hears one listen at a time"),
+                ));
+            }
+            listens.insert(request.id.clone(), audio);
+        }
+        let job = Arc::new(Job::default());
+        self.jobs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(request.id.clone(), Arc::clone(&job));
+        let listening = Listening {
+            id: request.id.clone(),
+            job,
+            session,
+            hearing,
+            output: Arc::clone(&self.output),
+            jobs: Arc::clone(&self.jobs),
+            listens: Arc::clone(&self.listens),
+            received: 0,
+            started: None,
+        };
+        thread::spawn(move || listening.run(&chunks));
+        Ok(())
+    }
+
     /// Does `task` for the request `id` on a thread of its own, and answers with the response
     /// it gives: `None` when it was stopped, which a cancel has already answered.
     fn work(&self, id: Id, task: impl FnOnce(&Job) -> Option<Response> + Send + 'static) {
@@ -552,6 +719,144 @@ impl Node {
                 .remove(&id);
             job.answer(&output, response.unwrap_or_else(|| cancelled(id)));
         });
+    }
+}
+
+/// One listen's thread: hears its audio as it comes, and says what it heard (see the
+/// [module docs](self)).
+struct Listening {
+    id: Id,
+    job: Arc<Job>,
+    session: Box<dyn Utterances>,
+    hearing: Arc<dyn Hearing>,
+    output: Output,
+    jobs: Jobs,
+    listens: Listens,
+    /// Samples heard so far.
+    received: usize,
+    /// Where the utterance being heard started, once `voice/speechStarted` has said so.
+    started: Option<usize>,
+}
+
+impl Listening {
+    /// Hears the audio from `chunks` until it ends (and answers the listen) or stops coming
+    /// (a cancel, which has answered).
+    fn run(mut self, chunks: &mpsc::Receiver<Chunk>) {
+        loop {
+            let (events, ended) = match chunks.recv() {
+                Ok(Chunk::Samples(samples)) => {
+                    self.received += samples.len();
+                    (self.session.hear(&samples), false)
+                }
+                Ok(Chunk::End) => (self.session.end(), true),
+                Err(_) => return self.forget(),
+            };
+            if let Err(error) = self.say(events) {
+                self.forget();
+                let why = internal(format!("hearing what was said failed: {error}"));
+                return self
+                    .job
+                    .answer(&self.output, Response::error(Some(self.id), why));
+            }
+            if ended {
+                // The detector may leave a start without its end (`listen`'s docs).
+                if let Some(start) = self.started.take() {
+                    self.heard(start, self.received, String::new());
+                }
+                self.forget();
+                let result = ListenResult {
+                    duration_ms: listen::millis_of(self.received),
+                };
+                return self
+                    .job
+                    .answer(&self.output, Response::ok::<Listen>(self.id, &result));
+            }
+        }
+    }
+
+    /// Says what the detector heard: each start once, and each utterance ended, heard.
+    fn say(&mut self, events: Vec<Event>) -> Result<(), SpeechError> {
+        for event in events {
+            match event {
+                Event::Started { at } => self.start(at),
+                Event::Ended { start, samples } => {
+                    self.start(start);
+                    self.started = None;
+                    let end = start + samples.len();
+                    let speech = Samples {
+                        rate: listen::SAMPLE_RATE,
+                        samples,
+                    };
+                    let text = self.hearing.transcribe(&speech)?;
+                    self.heard(start, end, text);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Says that speech started at sample `at`, unless it has said so for this utterance.
+    fn start(&mut self, at: usize) {
+        if self.started.is_none() {
+            self.started = Some(at);
+            let params = SpeechStartedParams {
+                id: self.id.clone(),
+                start_ms: listen::millis_of(at),
+            };
+            let message = Notification::new::<SpeechStarted>(&params).into();
+            send_unless_answered(&self.output, &self.job, message);
+        }
+    }
+
+    /// Says that `text` was said from sample `start` to `end`.
+    fn heard(&self, start: usize, end: usize, text: String) {
+        let params = HeardParams {
+            id: self.id.clone(),
+            text,
+            start_ms: listen::millis_of(start),
+            end_ms: listen::millis_of(end),
+            words: Vec::new(),
+        };
+        send_unless_answered(
+            &self.output,
+            &self.job,
+            Notification::new::<Heard>(&params).into(),
+        );
+    }
+
+    /// Takes the listen out of the node's records, before it is answered: then a new listen
+    /// may start. Only its own: once a cancel has answered it, the client may give its id to
+    /// a new request (spec, 4), whose records this mustn't take.
+    fn forget(&self) {
+        let mut listens = self.listens.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+        if jobs
+            .get(&self.id)
+            .is_some_and(|job| Arc::ptr_eq(job, &self.job))
+        {
+            jobs.remove(&self.id);
+            listens.remove(&self.id);
+        }
+    }
+}
+
+/// Writes `message`, for `job`'s request, unless that request has been answered: nothing
+/// follows a cancelled listen's answer (spec, 8.5). Checked under the output's lock, which
+/// the answer also takes.
+fn send_unless_answered(output: &Output, job: &Job, message: Message) {
+    let mut out = output.lock().unwrap_or_else(PoisonError::into_inner);
+    if !job.answered.load(Ordering::Acquire) {
+        let _ = cnp::stdio::write_message(&mut *out, &message);
+    }
+}
+
+/// Refuses a language Parakeet doesn't hear (it hears English, any region).
+fn english_only(language: &str) -> Result<(), ResponseError> {
+    let primary = language.split('-').next().unwrap_or_default();
+    if primary.eq_ignore_ascii_case(hear::LANGUAGE) {
+        Ok(())
+    } else {
+        Err(unsupported("Parakeet hears English only"))
     }
 }
 
@@ -778,7 +1083,78 @@ mod tests {
         }
     }
 
-    /// A running node with both models ready (fakes), and what it writes.
+    /// A Silero VAD for which a sample of 0.5 or more is speech, and anything else silence.
+    struct FakeDetect;
+
+    impl Detect for FakeDetect {
+        fn start(&self, settings: &listen::Settings) -> Result<Box<dyn Utterances>, SpeechError> {
+            Ok(Box::new(FakeSession {
+                min_speech: listen::samples_in(settings.min_speech),
+                end_silence: listen::samples_in(settings.end_silence),
+                received: 0,
+                speech: None,
+                silence: 0,
+            }))
+        }
+    }
+
+    /// [`FakeDetect`]'s session.
+    struct FakeSession {
+        min_speech: usize,
+        end_silence: usize,
+        received: usize,
+        /// The speech so far, and where it started.
+        speech: Option<(usize, Vec<f32>)>,
+        /// The silence since the last loud sample.
+        silence: usize,
+    }
+
+    impl Utterances for FakeSession {
+        fn hear(&mut self, samples: &[f32]) -> Vec<Event> {
+            let mut events = Vec::new();
+            for &sample in samples {
+                let at = self.received;
+                self.received += 1;
+                let loud = sample >= 0.5;
+                match &mut self.speech {
+                    None if loud => self.speech = Some((at, vec![sample])),
+                    None => {}
+                    Some((_, speech)) if loud => {
+                        speech.extend(std::iter::repeat_n(0.0, self.silence));
+                        speech.push(sample);
+                        self.silence = 0;
+                    }
+                    Some(_) => self.silence += 1,
+                }
+                if let Some((start, speech)) = &self.speech {
+                    if speech.len() == self.min_speech && loud && self.silence == 0 {
+                        events.push(Event::Started { at: *start });
+                    }
+                    if self.silence == self.end_silence {
+                        if speech.len() >= self.min_speech {
+                            let (start, samples) = (*start, speech.clone());
+                            events.push(Event::Ended { start, samples });
+                        }
+                        self.speech = None;
+                        self.silence = 0;
+                    }
+                }
+            }
+            events
+        }
+
+        fn end(&mut self) -> Vec<Event> {
+            self.silence = 0;
+            match self.speech.take() {
+                Some((start, samples)) if samples.len() >= self.min_speech => {
+                    vec![Event::Ended { start, samples }]
+                }
+                _ => Vec::new(),
+            }
+        }
+    }
+
+    /// A running node with every model ready (fakes), and what it writes.
     fn ready_node(pause: Duration) -> (Node, Written) {
         let written = Written::default();
         let mut node = Node::new(
@@ -786,15 +1162,55 @@ mod tests {
             Config {
                 speech: Some(models::KOKORO),
                 transcription: Some(models::PARAKEET),
+                listening: Some(models::SILERO_VAD),
                 ..Config::default()
             },
         );
         node.state = State::Running;
         let speech: Arc<dyn Speech> = Arc::new(FakeSpeech { pause });
         let hearing: Arc<dyn Hearing> = Arc::new(FakeHearing);
+        let listening: Arc<dyn Detect> = Arc::new(FakeDetect);
         let _ = node.speech.as_ref().unwrap().ready.set(speech);
         let _ = node.hearing.as_ref().unwrap().ready.set(hearing);
+        let _ = node.listening.as_ref().unwrap().ready.set(listening);
         (node, written)
+    }
+
+    /// `count` samples of `level`, as a listen's audio: base64 pcmF32.
+    fn audio(level: f32, count: usize) -> String {
+        BASE64.encode(level.to_le_bytes().repeat(count))
+    }
+
+    /// Sends listen `id` a piece of audio, or its end.
+    fn send_audio(node: &mut Node, id: i64, audio: Option<String>, end: bool) {
+        let params = AudioParams {
+            id: Id::from(id),
+            audio,
+            end,
+        };
+        node.notification(&Notification::new::<Audio>(&params));
+    }
+
+    /// The notifications the node sent so far, by method, with their params.
+    fn notifications(written: &Written) -> Vec<(String, serde_json::Value)> {
+        written
+            .messages()
+            .into_iter()
+            .filter_map(|message| match message {
+                Message::Notification(n) if !n.is::<ModelStateChanged>() => {
+                    Some((n.method, n.params.unwrap_or_default()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A listen that ends an utterance after 10 ms of silence, and takes 5 ms of sound as
+    /// speech.
+    fn quick_listen(id: i64) -> Request {
+        let params =
+            json!({"format": "pcmF32", "sampleRate": 16000, "endSilenceMs": 10, "minSpeechMs": 5});
+        request(id, "voice/listen", params)
     }
 
     fn request(id: i64, method: &str, params: serde_json::Value) -> Request {
@@ -903,6 +1319,202 @@ mod tests {
     }
 
     #[test]
+    fn a_listen_says_when_speech_starts_and_what_was_said_after_a_pause() {
+        let (mut node, written) = ready_node(Duration::ZERO);
+        node.request(&quick_listen(1));
+        // 10 ms of silence, 20 ms of speech, 20 ms of silence, then 10 ms more speech.
+        send_audio(&mut node, 1, Some(audio(0.0, 160)), false);
+        send_audio(&mut node, 1, Some(audio(0.9, 320)), false);
+        send_audio(&mut node, 1, Some(audio(0.0, 320)), false);
+        send_audio(&mut node, 1, Some(audio(0.9, 160)), true);
+        let result = written.response(1).result::<Listen>().unwrap();
+        assert_eq!(result.duration_ms, 60);
+        let said = notifications(&written);
+        let methods: Vec<&str> = said.iter().map(|(method, _)| method.as_str()).collect();
+        assert_eq!(
+            methods,
+            [
+                "voice/speechStarted",
+                "voice/heard",
+                "voice/speechStarted",
+                "voice/heard"
+            ]
+        );
+        assert_eq!(said[0].1, json!({"id": 1, "startMs": 10}));
+        assert_eq!(
+            said[1].1,
+            json!({"id": 1, "text": "320 samples at 16000 Hz", "startMs": 10, "endMs": 30})
+        );
+        // The audio ended mid-speech: what was said so far is heard.
+        assert_eq!(said[3].1["text"], "160 samples at 16000 Hz");
+        assert!(node.listens.lock().unwrap().is_empty());
+        assert!(node.jobs.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_cancelled_listen_drops_what_it_was_hearing_and_says_nothing_more() {
+        let (mut node, written) = ready_node(Duration::ZERO);
+        node.request(&quick_listen(2));
+        send_audio(&mut node, 2, Some(audio(0.9, 320)), false);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while notifications(&written).is_empty() {
+            assert!(Instant::now() < deadline, "speech didn't start");
+            thread::sleep(Duration::from_millis(5));
+        }
+        let cancel = Notification {
+            method: "$/cancelRequest".to_string(),
+            params: Some(json!({"id": 2})),
+        };
+        node.notification(&cancel);
+        assert_eq!(
+            written.response(2).outcome.unwrap_err().code,
+            code::CANCELLED
+        );
+        // Audio after the cancel is ignored: the listen has gone.
+        send_audio(&mut node, 2, Some(audio(0.0, 320)), true);
+        thread::sleep(Duration::from_millis(100));
+        let said = notifications(&written);
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert_eq!(said[0].0, "voice/speechStarted");
+        // And another listen may start.
+        node.request(&quick_listen(3));
+        send_audio(&mut node, 3, None, true);
+        assert!(written.response(3).result::<Listen>().is_ok());
+    }
+
+    /// A Parakeet that takes `pause` to hear anything.
+    struct SlowHearing {
+        pause: Duration,
+    }
+
+    impl Hearing for SlowHearing {
+        fn transcribe(&self, _speech: &Samples) -> Result<String, SpeechError> {
+            thread::sleep(self.pause);
+            Ok("Knight to f3.".to_string())
+        }
+    }
+
+    #[test]
+    fn a_cancelled_listen_leaves_a_new_listen_with_its_id_alone() {
+        let (mut node, written) = ready_node(Duration::ZERO);
+        let slow: Arc<dyn Hearing> = Arc::new(SlowHearing {
+            pause: Duration::from_millis(300),
+        });
+        node.hearing = Some(Arc::new(Slot::new(models::PARAKEET)));
+        let _ = node.hearing.as_ref().unwrap().ready.set(slow);
+        node.request(&quick_listen(2));
+        // An utterance that ends, which the listen's thread is still hearing when cancelled.
+        send_audio(&mut node, 2, Some(audio(0.9, 320)), false);
+        send_audio(&mut node, 2, Some(audio(0.0, 320)), false);
+        thread::sleep(Duration::from_millis(50));
+        let cancel = Notification {
+            method: "$/cancelRequest".to_string(),
+            params: Some(json!({"id": 2})),
+        };
+        node.notification(&cancel);
+        assert_eq!(
+            written.response(2).outcome.unwrap_err().code,
+            code::CANCELLED
+        );
+        // The id is free once answered (spec, 4): a new listen takes it.
+        node.request(&quick_listen(2));
+        // The first listen's thread finishes hearing, and ends, after the new one started.
+        thread::sleep(Duration::from_millis(500));
+        send_audio(&mut node, 2, None, true);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let answered = || {
+            written.messages().into_iter().any(|m| {
+                matches!(m, Message::Response(r)
+                    if r.id == Some(Id::from(2)) && r.outcome.is_ok())
+            })
+        };
+        while !answered() {
+            assert!(Instant::now() < deadline, "the new listen was forgotten");
+            thread::sleep(Duration::from_millis(5));
+        }
+        // And nothing heard by the cancelled listen was said.
+        assert!(
+            !notifications(&written)
+                .iter()
+                .any(|(m, _)| m == "voice/heard")
+        );
+    }
+
+    #[test]
+    fn a_listen_is_checked_before_it_hears() {
+        let (mut node, written) = ready_node(Duration::ZERO);
+        let invalid_params = [
+            json!({"format": "wav", "sampleRate": 16000}),
+            json!({"format": "pcmF32", "sampleRate": 44100}),
+            json!({"format": "pcmF32", "sampleRate": 0}),
+            json!({"format": "pcmF32", "sampleRate": 16000, "endSilenceMs": 0}),
+            json!({"format": "pcmF32", "sampleRate": 16000, "maxSpeechMs": 600000}),
+            json!({"format": "pcmF32"}),
+        ];
+        for (n, params) in invalid_params.into_iter().enumerate() {
+            let id = n as i64 + 1;
+            node.request(&request(id, "voice/listen", params));
+            let error = written.response(id).outcome.unwrap_err();
+            assert_eq!(error.code, code::INVALID_PARAMS, "{}", error.message);
+        }
+        let unsupported = [
+            json!({"format": "pcmF32", "sampleRate": 16000, "language": "fr"}),
+            json!({"format": "pcmF32", "sampleRate": 16000, "wordTimes": true}),
+        ];
+        for (n, params) in unsupported.into_iter().enumerate() {
+            let id = n as i64 + 10;
+            node.request(&request(id, "voice/listen", params));
+            let error = written.response(id).outcome.unwrap_err();
+            assert_eq!(error.code, code::UNSUPPORTED, "{}", error.message);
+        }
+        // One listen at a time.
+        node.request(&quick_listen(20));
+        node.request(&quick_listen(21));
+        assert_eq!(written.response(21).outcome.unwrap_err().code, code::BUSY);
+        // Audio that isn't whole samples ends the listen.
+        send_audio(&mut node, 20, Some(BASE64.encode([0u8; 6])), false);
+        let error = written.response(20).outcome.unwrap_err();
+        assert_eq!(error.code, code::INVALID_PARAMS, "{}", error.message);
+        assert!(node.listens.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_listen_needs_its_models_ready_and_a_node_started_to_listen() {
+        let written = Written::default();
+        let mut node = Node::new(
+            Arc::new(Mutex::new(Box::new(written.clone()))),
+            Config {
+                transcription: Some(models::PARAKEET),
+                listening: Some(models::SILERO_VAD),
+                ..Config::default()
+            },
+        );
+        node.state = State::Running;
+        node.request(&quick_listen(1));
+        let error = written.response(1).outcome.unwrap_err();
+        assert_eq!(error.code, code::NOT_READY);
+        assert_eq!(error.message, "Silero VAD v5 isn't ready: waiting");
+
+        let (mut deaf, written) = {
+            let written = Written::default();
+            let node = Node::new(
+                Arc::new(Mutex::new(Box::new(written.clone()))),
+                Config {
+                    transcription: Some(models::PARAKEET),
+                    ..Config::default()
+                },
+            );
+            (node, written)
+        };
+        deaf.state = State::Running;
+        deaf.request(&quick_listen(2));
+        assert_eq!(
+            written.response(2).outcome.unwrap_err().code,
+            code::UNSUPPORTED
+        );
+    }
+
+    #[test]
     fn a_model_that_isnt_ready_says_how_far_it_has_got() {
         let written = Written::default();
         let mut node = Node::new(
@@ -951,6 +1563,7 @@ mod tests {
                 models_dir: Some(dir.clone()),
                 speech: Some(models::KOKORO),
                 transcription: Some(models::PARAKEET),
+                listening: Some(models::SILERO_VAD),
                 offline: true,
             },
         );
@@ -971,7 +1584,7 @@ mod tests {
                 _ => false,
             })
         };
-        while !(failed("kokoro") && failed("parakeet")) {
+        while !(failed("kokoro") && failed("parakeet") && failed("silero-vad")) {
             assert!(Instant::now() < deadline, "the models didn't fail");
             thread::sleep(Duration::from_millis(5));
         }

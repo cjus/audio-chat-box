@@ -3,7 +3,9 @@
 The voice of [Solrac](https://github.com/cjus/solrac-chess), as a program of its own. It reads
 text aloud with [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) and turns speech into text
 with [Parakeet TDT 0.6B v2](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2), on the computer
-it runs on, through [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx). It answers the
+it runs on, through [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx). It can also listen:
+the client streams its microphone, and [Silero VAD](https://github.com/snakers4/silero-vad)
+finds each thing said, which Parakeet hears once the speaker pauses. It answers the
 [Chess Node Protocol](https://github.com/cjus/chess-node-protocol)'s voice domain (CNP, spec
 section 8) over its standard input and output. It never touches a microphone or a speaker:
 the client records and plays.
@@ -19,9 +21,10 @@ target/release/solrac-voice --models <folder>
 
 | Option | |
 | --- | --- |
-| `--models <folder>` | Where the models are, and are downloaded to the first time: Kokoro 350 MB, Parakeet 482 MB, from the PNX Studios CDN, each checked against its SHA-256. Solrac passes its own (`~/Library/Application Support/Solrac/models` on macOS) |
+| `--models <folder>` | Where the models are, and are downloaded to the first time: Kokoro 350 MB, Parakeet 482 MB, Silero VAD 2 MB, from the PNX Studios CDN, each checked against its SHA-256. Solrac passes its own (`~/Library/Application Support/Solrac/models` on macOS) |
 | `--speak <model>` | `kokoro` (the default), `kokoro-int8`, or `none` |
 | `--hear <model>` | `parakeet` (the default), or `none` |
+| `--listen <model>` | `silero-vad`, or `none` (the default): listen to speech as it comes (`voice/listen`), heard with the `--hear` model. Off unless asked for, since a client that doesn't know a listening model can't read `voice/models` |
 | `--offline` | Never download: a model that isn't in the folder fails |
 
 It then reads CNP messages, one JSON line each, and answers:
@@ -38,8 +41,13 @@ It then reads CNP messages, one JSON line each, and answers:
 `voice/transcribe` hears a WAV file or raw samples. On the M1 Max both models load in about a
 second, and a sentence is read in under one.
 
-`cargo run --release --example say`, `hear` and `bakeoff` read text aloud to a WAV file, hear
-WAV files, and compare transcription models, for measuring. `tools/bakeoff/make-clips.sh` makes
+`voice/listen` takes 16 kHz raw samples in `voice/audio` notifications, as they come from the
+microphone, and says `voice/speechStarted` when someone starts speaking and `voice/heard` with
+what they said once they pause (800 ms unless the listen says otherwise). One listen at a time.
+
+`cargo run --release --example say`, `hear`, `listen` and `bakeoff` read text aloud to a WAV
+file, hear WAV files, listen to WAV files as a stream, and compare transcription models, for
+measuring. `tools/bakeoff/make-clips.sh` makes
 the bake-off's recordings (macOS).
 
 ## Licence
@@ -53,7 +61,7 @@ The `solrac-voice` program as built links sherpa-onnx's prebuilt library, which 
 [eSpeak NG](https://github.com/espeak-ng/espeak-ng) (GPL-3.0-or-later): Kokoro uses it to sound
 out words its lexicon doesn't have. So the program as a whole is
 [GPL-3.0-or-later](LICENSE-GPL-3.0), and its source is this repository. The models have licences
-of their own: Kokoro Apache-2.0, Parakeet CC-BY-4.0 (by NVIDIA).
+of their own: Kokoro Apache-2.0, Parakeet CC-BY-4.0 (by NVIDIA), Silero VAD MIT.
 
 Every copy of the program goes with the notices of what it is built with:
 `tools/notices.sh` writes them to `target/licences/THIRD-PARTY-NOTICES.txt`. They are the

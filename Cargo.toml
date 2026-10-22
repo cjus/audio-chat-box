@@ -12,7 +12,7 @@ publish = false
 
 [dependencies]
 # The Chess Node Protocol's types (`MIT OR Apache-2.0`), pinned to a commit on its `main`.
-cnp = { git = "https://github.com/cjus/chess-node-protocol", rev = "314286da4f660b3ce50dfc4789fb82446b15fd53" }
+cnp = { git = "https://github.com/cjus/chess-node-protocol", rev = "37af31c47a8c11e88a29a1d2e95d6520e5866432" }
 # sherpa-onnx (Apache-2.0), k2-fsa's speech toolkit: Kokoro and Parakeet through ONNX
 # Runtime. Pinned exactly: its build script downloads the prebuilt library of the same
 # version (about 20 MB, with ONNX Runtime and eSpeak NG linked in) and links it statically. CI
@@ -35,7 +35,7 @@ tokio = { version = "1.53", features = ["rt", "time"] }
 [dev-dependencies]
 serde_json = "1.0"
 # The protocol's conformance sessions, run against this program.
-cnp-conformance = { git = "https://github.com/cjus/chess-node-protocol", rev = "314286da4f660b3ce50dfc4789fb82446b15fd53" }
+cnp-conformance = { git = "https://github.com/cjus/chess-node-protocol", rev = "37af31c47a8c11e88a29a1d2e95d6520e5866432" }
 
 [lints.rust]
 missing_docs = "deny"

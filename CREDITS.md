@@ -8,7 +8,8 @@ The models `solrac-voice` downloads, and the code it links. (They moved here fro
 It downloads its models the first time it needs them, from the PNX Studios CDN
 (`https://cdn.pnxstudios.com/solrac/models/`), into the folder `--models` names, and checks
 each against the size and SHA-256 in `src/models.rs`. The archives are sherpa-onnx's,
-unchanged, and a `NOTICE.txt` beside them on the CDN gives the same licences as below.
+unchanged, but for Silero VAD's, and a `NOTICE.txt` beside them on the CDN gives the same
+licences as below.
 
 | Archive | What | Source | Licence |
 | --- | --- | --- | --- |
@@ -16,6 +17,7 @@ unchanged, and a `NOTICE.txt` beside them on the CDN gives the same licences as 
 | the same, `espeak-ng-data/` | eSpeak NG's pronunciation data | [eSpeak NG](https://github.com/espeak-ng/espeak-ng) (its source) | GPL-3.0-or-later |
 | the same, `dict/` | CppJieba's dictionaries, for Chinese, which Solrac doesn't read | [CppJieba](https://github.com/yanyiwu/cppjieba) | MIT |
 | `sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2` | Parakeet TDT 0.6B v2: its weights converted to ONNX and quantised to 8-bit integers by sherpa-onnx, which also packaged it. `solrac-voice` writes a `bpe.vocab` beside it, made from its `tokens.txt` | [nvidia/parakeet-tdt-0.6b-v2](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) by NVIDIA, packaged by [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models) | [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/) |
+| `silero-vad-v5.tar.bz2` | Silero VAD v5, which finds speech for listening (cjus/chessgui#134): `silero_vad.onnx` unchanged, with its licence. Silero publishes a bare file, so `tools/pack-silero-vad.sh` packs it, the one archive here not sherpa-onnx's | [snakers4/silero-vad](https://github.com/snakers4/silero-vad) at tag v5.0, by the Silero Team | MIT |
 
 ## Linked into the program
 
