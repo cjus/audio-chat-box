@@ -4,7 +4,7 @@
 //! The sessions come with the `cnp-conformance` crate ([`cnp_conformance::SESSIONS`]), so a
 //! new session there is checked here as soon as the protocol's pin is bumped. The node runs
 //! `--offline` with an empty models folder: no session needs a model to be ready, and no test
-//! downloads one. The engine's sessions are for engine nodes, and are left out.
+//! downloads one. It listens (`--listen`), so the listening sessions apply. The engine's sessions are for engine nodes, and are left out.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -15,7 +15,7 @@ use cnp_conformance::{SESSIONS, session};
 /// How long one step of a session may wait. Generous: the tests run unoptimised builds.
 const STEP_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// The program, offline, with a models folder that doesn't exist.
+/// The program, offline, listening, with a models folder that doesn't exist.
 fn node() -> Vec<String> {
     let models =
         std::env::temp_dir().join(format!("solrac-voice-conformance-{}", std::process::id()));
@@ -24,6 +24,8 @@ fn node() -> Vec<String> {
         "--offline".to_string(),
         "--models".to_string(),
         models.to_string_lossy().into_owned(),
+        "--listen".to_string(),
+        "silero-vad".to_string(),
     ]
 }
 
@@ -59,6 +61,8 @@ fn solrac_voice_passes_every_conformance_session_that_applies() {
         "models",
         "speak-unknown-voice",
         "transcribe-bad-audio",
+        "listen-bad-params",
+        "audio-for-no-listen",
     ] {
         assert!(
             passed.iter().any(|name| name == voice),

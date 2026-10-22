@@ -6,6 +6,8 @@
 //!
 //! - [`speak`]: Kokoro v1.0 reads text aloud, in any of its voices.
 //! - [`hear`]: Parakeet TDT 0.6B v2 turns speech into text, with chess words favoured.
+//! - [`listen`]: Silero VAD finds speech in audio as it comes, for Solrac's hands-free voice
+//!   (cjus/chessgui#134): the node hears each utterance once the speaker pauses.
 //! - [`models`]: the models, downloaded once from the PNX Studios CDN, checked and unpacked.
 //! - [`node`]: the CNP node. Requests come in, and answers and the models' progress go out.
 //!
@@ -25,12 +27,14 @@
 //!
 //! sherpa-onnx (Apache-2.0): <https://github.com/k2-fsa/sherpa-onnx>. Kokoro (Apache-2.0):
 //! <https://huggingface.co/hexgrad/Kokoro-82M>. Parakeet TDT 0.6B v2 (CC-BY-4.0):
-//! <https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2>. eSpeak NG (GPL-3.0-or-later):
+//! <https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2>. Silero VAD (MIT):
+//! <https://github.com/snakers4/silero-vad>. eSpeak NG (GPL-3.0-or-later):
 //! <https://github.com/espeak-ng/espeak-ng>.
 
 #![forbid(unsafe_code)]
 
 pub mod hear;
+pub mod listen;
 pub mod models;
 pub mod node;
 pub mod speak;

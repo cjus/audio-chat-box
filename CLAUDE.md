@@ -1,7 +1,8 @@
 # solrac-voice — instructions for Claude
 
 `solrac-voice` (repo `cjus/solrac-voice`) is Solrac's voice as a program of its own: Kokoro
-reads text aloud, Parakeet hears speech, through sherpa-onnx, behind the Chess Node Protocol's
+reads text aloud, Parakeet hears speech, Silero VAD finds speech as it streams in, through
+sherpa-onnx, behind the Chess Node Protocol's
 voice domain over standard input and output. It is step 6 of Solrac's milestone M1b
 (`cjus/chessgui`, tracked in cjus/chessgui#98; the design is `docs/protocol.md` there). Its client
 is Solrac. Owner: Carlos.
@@ -44,7 +45,9 @@ The tests never download a model (the conformance sessions run `--offline`). To 
 speak for real, point it at a folder with the models, such as Solrac's:
 `target/debug/solrac-voice --models "$HOME/Library/Application Support/Solrac/models"`, then
 send it `initialize`, wait for both models' `ready`, and send `voice/speak` and
-`voice/transcribe`.
+`voice/transcribe`. To listen, add `--listen silero-vad` and stream audio to a `voice/listen`;
+`cargo run --release --example listen -- <models folder> <file.wav>...` hears WAV files the same
+way without the protocol.
 
 ## Items for Carlos go in GitHub issues
 

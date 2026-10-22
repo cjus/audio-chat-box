@@ -1,8 +1,10 @@
-//! The models: Kokoro to speak, Parakeet to hear, downloaded once from the PNX Studios CDN,
-//! checked, and unpacked into the models folder Solrac names (`--models`).
+//! The models: Kokoro to speak, Parakeet to hear, Silero VAD to listen, downloaded once from
+//! the PNX Studios CDN, checked, and unpacked into the models folder Solrac names
+//! (`--models`).
 //!
 //! A [`LocalModel`] is one of sherpa-onnx's archives, copied unchanged to the CDN at
-//! [`MODELS_URL`]. [`download`] makes sure it is unpacked in the models folder, and returns
+//! [`MODELS_URL`]; Silero VAD, which comes as a bare file, is packed the same way by
+//! `tools/pack-silero-vad.sh`. [`download`] makes sure it is unpacked in the models folder, and returns
 //! its folder:
 //!
 //! 1. A model's folder appears in the models folder only when it is whole (step 4), so if it
@@ -36,6 +38,7 @@
 //! sha2 (MIT or Apache-2.0), tar and bzip2 (MIT or Apache-2.0); bzip2 links libbzip2
 //! (bzip2-1.0.6 licence, BSD-like). Kokoro v1.0 (Apache-2.0) and Parakeet TDT 0.6B v2
 //! (CC-BY-4.0), as sherpa-onnx packages them: <https://github.com/k2-fsa/sherpa-onnx/releases>.
+//! Silero VAD v5 (MIT): <https://github.com/snakers4/silero-vad>.
 
 use std::fmt;
 use std::fs::{self, File};
@@ -67,15 +70,17 @@ pub const ABANDONED: Duration = Duration::from_secs(60);
 /// archives.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LocalModel {
-    /// Its id in CNP's `voice/models`, and on the command line (`--speak`, `--hear`).
+    /// Its id in CNP's `voice/models`, and on the command line (`--speak`, `--hear`,
+    /// `--listen`).
     pub id: &'static str,
     /// Its name for people.
     pub name: &'static str,
-    /// Whether it speaks or hears.
+    /// Whether it speaks, hears, or listens.
     pub purpose: ModelPurpose,
     /// The model's licence, an SPDX expression.
     pub license: &'static str,
-    /// The archive's file name, the same on the CDN as in sherpa-onnx's release.
+    /// The archive's file name, the same on the CDN as in sherpa-onnx's release (or as
+    /// `tools/pack-silero-vad.sh` names it).
     pub archive: &'static str,
     /// The archive's size, in bytes.
     pub archive_bytes: u64,
@@ -130,8 +135,23 @@ pub const PARAKEET: LocalModel = LocalModel {
     model_file: "encoder.int8.onnx",
 };
 
+/// Silero VAD v5, which hears when speech starts and ends, for listening (cjus/chessgui#134):
+/// a 2 MB download. Silero publishes a bare `.onnx` file, which `tools/pack-silero-vad.sh`
+/// packs, with its licence, as the archive on the CDN.
+pub const SILERO_VAD: LocalModel = LocalModel {
+    id: "silero-vad",
+    name: "Silero VAD v5",
+    purpose: ModelPurpose::Listen,
+    license: "MIT",
+    archive: "silero-vad-v5.tar.bz2",
+    archive_bytes: 2_014_134,
+    sha256: "070c701224a64c703c99e483a2c3d4fa5583f006d13a2238f85699898a834835",
+    folder: "silero-vad-v5",
+    model_file: "silero_vad.onnx",
+};
+
 /// Every model this program knows.
-pub const MODELS: [LocalModel; 3] = [KOKORO, KOKORO_INT8, PARAKEET];
+pub const MODELS: [LocalModel; 4] = [KOKORO, KOKORO_INT8, PARAKEET, SILERO_VAD];
 
 /// The model whose [`id`](LocalModel::id) is `id`, if there is one.
 pub fn model(id: &str) -> Option<LocalModel> {
