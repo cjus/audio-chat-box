@@ -779,13 +779,19 @@ impl Listening {
         for event in events {
             match event {
                 Event::Started { at } => self.start(at),
-                Event::Ended { start, samples } => {
+                Event::Ended {
+                    start,
+                    samples,
+                    mut lead_in,
+                } => {
                     self.start(start);
                     self.started = None;
                     let end = start + samples.len();
+                    // Heard with its lead-in, so a short first word isn't lost (listen.rs).
+                    lead_in.extend(samples);
                     let speech = Samples {
                         rate: listen::SAMPLE_RATE,
-                        samples,
+                        samples: lead_in,
                     };
                     let text = self.hearing.transcribe(&speech)?;
                     self.heard(start, end, text);
@@ -1133,7 +1139,11 @@ mod tests {
                     if self.silence == self.end_silence {
                         if speech.len() >= self.min_speech {
                             let (start, samples) = (*start, speech.clone());
-                            events.push(Event::Ended { start, samples });
+                            events.push(Event::Ended {
+                                start,
+                                samples,
+                                lead_in: Vec::new(),
+                            });
                         }
                         self.speech = None;
                         self.silence = 0;
@@ -1147,7 +1157,11 @@ mod tests {
             self.silence = 0;
             match self.speech.take() {
                 Some((start, samples)) if samples.len() >= self.min_speech => {
-                    vec![Event::Ended { start, samples }]
+                    vec![Event::Ended {
+                        start,
+                        samples,
+                        lead_in: Vec::new(),
+                    }]
                 }
                 _ => Vec::new(),
             }
