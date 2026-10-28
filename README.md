@@ -1,5 +1,7 @@
 # audio-chat-box
 
+![audio-chat-box](audio-chat-box.png)
+
 Speech for a program that talks with people, on the computer it runs on. audio-chat-box
 reads text aloud with [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M), turns speech into
 text with [Parakeet TDT 0.6B v2](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2), and can
