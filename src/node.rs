@@ -49,6 +49,12 @@
 //!   audio and hands it to the listen's thread: it never transcribes. A loop that stopped
 //!   reading while Parakeet worked would fill the pipe, and the client writing the next audio
 //!   would wait for it.
+//! - **A listen's records go together.** Its thread ends when its audio stops coming, and then
+//!   takes its job out of the node's records (`Listening::forget`). So whoever ends a listen
+//!   from outside (a cancel, `shutdown`, audio that can't be read) takes its audio and its job
+//!   out at once, under both locks, before answering it: taken one after the other, the thread
+//!   could take the job in between, and the listen would never be answered.
+//!   Both locks are taken in one order, listens then jobs, everywhere.
 
 use std::collections::HashMap;
 use std::io::{self, BufRead, Cursor, Write};
@@ -420,19 +426,19 @@ impl Node {
         let Ok(params) = notification.params::<CancelRequest>() else {
             return;
         };
-        // A listen's thread ends when its audio stops coming.
-        self.listens
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(&params.id);
-        let job = self
-            .jobs
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(&params.id);
-        if let Some(job) = job {
+        if let Some(job) = self.take(&params.id) {
             cancel(&job, params.id, &self.output);
         }
+    }
+
+    /// Takes the request `id` out of the node's records, with its audio if it is a listen
+    /// (whose thread then ends), and gives its job to answer. Both at once, under both locks:
+    /// see the [module docs](self)' pitfalls.
+    fn take(&self, id: &Id) -> Option<Arc<Job>> {
+        let mut listens = self.listens.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+        listens.remove(id);
+        jobs.remove(id)
     }
 
     /// Hands a piece of audio to its listen's thread. Audio for a listen the node doesn't
@@ -449,13 +455,14 @@ impl Node {
                 .ok()
                 .and_then(|bytes| hear::samples_of_pcm_f32(&bytes, listen::SAMPLE_RATE).ok());
             let Some(samples) = samples else {
-                listens.remove(&params.id);
-                drop(listens);
+                // Under the listens' lock still, so its thread can't take its job first.
                 let job = self
                     .jobs
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
                     .remove(&params.id);
+                listens.remove(&params.id);
+                drop(listens);
                 if let Some(job) = job {
                     let why = invalid("the audio isn't whole pcmF32 samples in base64".to_string());
                     job.stop.store(true, Ordering::Relaxed);
@@ -475,17 +482,13 @@ impl Node {
 
     /// Answers every request being worked on with `Cancelled` (a cancel, or `shutdown`).
     fn cancel_all(&mut self) {
-        // Their audio stops coming, which ends the listens' threads.
-        self.listens
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clear();
-        let jobs: Vec<_> = self
-            .jobs
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .drain()
-            .collect();
+        // Their audio stops coming, which ends the listens' threads: both at once, as `take`.
+        let jobs: Vec<_> = {
+            let mut listens = self.listens.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+            listens.clear();
+            jobs.drain().collect()
+        };
         for (id, job) in jobs {
             cancel(&job, id, &self.output);
         }
