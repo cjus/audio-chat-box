@@ -18,6 +18,20 @@ product's domain: your program tells it which words to expect (hotwords), and it
 them where the sound allows, "knight" over "night" for a chess board, your product's names
 for yours.
 
+## Parrot Service in Docker
+
+Try microphone recording, transcription and spoken read-back on a single local page:
+
+```sh
+docker compose up --build
+# Open http://localhost:8080
+```
+
+The first start downloads checked speech models into a persistent volume. This is a speech
+demo, not an LLM chatbot; no account or API key is required. See
+[the Docker demo guide](docs/docker-demo.md) for CPU architecture, model downloads,
+privacy, browser requirements, limits and redistribution considerations.
+
 ## Running it
 
 ```sh
