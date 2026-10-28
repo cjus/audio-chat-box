@@ -74,14 +74,14 @@ use cnp::voice::{
 };
 use cnp::{Id, Message, Notification, Request, RequestMethod, Response, ResponseError, code};
 
-use crate::hear::{self, Transcriber};
+use crate::hear::{self, Hotwords, Transcriber};
 use crate::listen::{self, Detect, Detector, Event, Utterances};
 use crate::models::{self, LocalModel};
 use crate::speak::{self, DEFAULT_VOICE, SPEEDS, Speaker};
 use crate::{Samples, SpeechError};
 
 /// The node's name, as `initialize` gives it.
-pub const NAME: &str = "solrac-voice";
+pub const NAME: &str = "audio-chat-box";
 
 /// The node's version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -94,7 +94,7 @@ pub const AUTHOR: &str = "Carlos Justiniano";
 pub const LICENSE: &str = "GPL-3.0-or-later";
 
 /// Where its source is.
-pub const SOURCE: &str = "https://github.com/cjus/solrac-voice";
+pub const SOURCE: &str = "https://github.com/cjus/audio-chat-box";
 
 /// How often a download's progress is reported, at most (spec, 8.4: "about once a second").
 pub const PROGRESS_INTERVAL: Duration = Duration::from_secs(1);
@@ -113,6 +113,9 @@ pub struct Config {
     /// Never download: a model that isn't in the models folder fails. For tests and
     /// computers without the network.
     pub offline: bool,
+    /// Where the models are downloaded from, ending in `/`. Missing:
+    /// [`models::MODELS_URL`].
+    pub models_url: Option<String>,
 }
 
 /// Reads text aloud: Kokoro's [`Speaker`], or a fake in tests.
@@ -142,13 +145,13 @@ impl Speech for Speaker {
 
 /// Hears speech: Parakeet's [`Transcriber`], or a fake in tests.
 pub trait Hearing: Send + Sync {
-    /// What is said in `speech`: empty if nothing was heard.
-    fn transcribe(&self, speech: &Samples) -> Result<String, SpeechError>;
+    /// What is said in `speech`, with `hotwords` favoured: empty if nothing was heard.
+    fn transcribe(&self, speech: &Samples, hotwords: &Hotwords) -> Result<String, SpeechError>;
 }
 
 impl Hearing for Transcriber {
-    fn transcribe(&self, speech: &Samples) -> Result<String, SpeechError> {
-        Transcriber::transcribe(self, speech)
+    fn transcribe(&self, speech: &Samples, hotwords: &Hotwords) -> Result<String, SpeechError> {
+        Transcriber::transcribe(self, speech, hotwords)
     }
 }
 
@@ -515,12 +518,16 @@ impl Node {
                 source: Some(SOURCE.to_string()),
             },
             capabilities: Capabilities {
+                preferences: None,
+                games: None,
+                backups: None,
                 engine: None,
                 voice: Some(VoiceCapabilities {
                     speak: self.speech.is_some(),
                     transcribe: self.hearing.is_some(),
                     listen: self.listening.is_some() && self.hearing.is_some(),
                     word_times: false,
+                    hotwords: self.hearing.is_some(),
                     formats: vec![AudioFormat::Wav, AudioFormat::PcmF32],
                 }),
             },
@@ -531,24 +538,43 @@ impl Node {
 
     /// Starts getting each model ready, on a thread of its own (see the [module docs](self)).
     fn prepare_models(&self) {
-        let (dir, offline) = (self.config.models_dir.clone(), self.config.offline);
+        let dir = self.config.models_dir.clone();
+        let url = self
+            .config
+            .models_url
+            .as_deref()
+            .unwrap_or(models::MODELS_URL);
+        // No download at all, offline.
+        let from = (!self.config.offline).then(|| url.to_string());
         if let Some(slot) = &self.speech {
             let load = |model: &LocalModel, folder: &Path| -> Result<Arc<dyn Speech>, _> {
                 Ok(Arc::new(Speaker::load(model, folder)?))
             };
-            spawn_prepare(Arc::clone(slot), dir.clone(), offline, &self.output, load);
+            spawn_prepare(
+                Arc::clone(slot),
+                dir.clone(),
+                from.clone(),
+                &self.output,
+                load,
+            );
         }
         if let Some(slot) = &self.hearing {
             let load = |model: &LocalModel, folder: &Path| -> Result<Arc<dyn Hearing>, _> {
                 Ok(Arc::new(Transcriber::load(model, folder)?))
             };
-            spawn_prepare(Arc::clone(slot), dir.clone(), offline, &self.output, load);
+            spawn_prepare(
+                Arc::clone(slot),
+                dir.clone(),
+                from.clone(),
+                &self.output,
+                load,
+            );
         }
         if let Some(slot) = &self.listening {
             let load = |model: &LocalModel, folder: &Path| -> Result<Arc<dyn Detect>, _> {
                 Ok(Arc::new(Detector::load(model, folder)?))
             };
-            spawn_prepare(Arc::clone(slot), dir, offline, &self.output, load);
+            spawn_prepare(Arc::clone(slot), dir, from, &self.output, load);
         }
     }
 
@@ -614,6 +640,7 @@ impl Node {
         if let Some(language) = &params.language {
             english_only(language)?;
         }
+        let hotwords = Hotwords::of(&params.hotwords).map_err(invalid)?;
         let transcriber = self
             .hearing
             .as_ref()
@@ -621,7 +648,7 @@ impl Node {
             .ready()?;
         let id = request.id.clone();
         self.work(id.clone(), move |_job| {
-            Some(match transcriber.transcribe(&samples) {
+            Some(match transcriber.transcribe(&samples, &hotwords) {
                 Ok(text) => {
                     let heard = TranscribeResult {
                         text,
@@ -654,8 +681,10 @@ impl Node {
             params.end_silence_ms,
             params.min_speech_ms,
             params.max_speech_ms,
+            params.lead_in_ms,
         )
         .map_err(invalid)?;
+        let hotwords = Hotwords::of(&params.hotwords).map_err(invalid)?;
         if let Some(language) = &params.language {
             english_only(language)?;
         }
@@ -693,6 +722,7 @@ impl Node {
             job,
             session,
             hearing,
+            hotwords,
             output: Arc::clone(&self.output),
             jobs: Arc::clone(&self.jobs),
             listens: Arc::clone(&self.listens),
@@ -729,6 +759,8 @@ struct Listening {
     job: Arc<Job>,
     session: Box<dyn Utterances>,
     hearing: Arc<dyn Hearing>,
+    /// The listen's hotwords, for every utterance.
+    hotwords: Hotwords,
     output: Output,
     jobs: Jobs,
     listens: Listens,
@@ -793,7 +825,7 @@ impl Listening {
                         rate: listen::SAMPLE_RATE,
                         samples: lead_in,
                     };
-                    let text = self.hearing.transcribe(&speech)?;
+                    let text = self.hearing.transcribe(&speech, &self.hotwords)?;
                     self.heard(start, end, text);
                 }
             }
@@ -926,13 +958,13 @@ fn wav(samples: &Samples) -> Vec<u8> {
     file.into_inner()
 }
 
-/// Starts a thread that gets `slot`'s model ready: downloads it into `models_dir` unless it
-/// is there (or `offline`), loads it with `load`, and reports each stage (see the
-/// [module docs](self)).
+/// Starts a thread that gets `slot`'s model ready: downloads it into `models_dir` from the
+/// address `from` unless it is there (or there is no address: offline), loads it with `load`,
+/// and reports each stage (see the [module docs](self)).
 fn spawn_prepare<T: ?Sized + Send + Sync + 'static>(
     slot: Arc<Slot<T>>,
     models_dir: Option<PathBuf>,
-    offline: bool,
+    from: Option<String>,
     output: &Output,
     load: impl FnOnce(&LocalModel, &Path) -> Result<Arc<T>, SpeechError> + Send + 'static,
 ) {
@@ -946,13 +978,13 @@ fn spawn_prepare<T: ?Sized + Send + Sync + 'static>(
             })?;
             let folder = if models::is_ready(&model, &models_dir) {
                 models::folder(&model, &models_dir)
-            } else if offline {
+            } else if let Some(from) = &from {
+                download(&slot, &models_dir, from, &output)?
+            } else {
                 return Err(format!(
                     "{name} isn't in {}, and {NAME} was started --offline",
                     models_dir.display()
                 ));
-            } else {
-                download(&slot, &models_dir, &output)?
             };
             slot.set_state(models::state(Stage::Loading), &output);
             load(&model, &folder).map_err(|error| format!("{name} couldn't be loaded: {error}"))
@@ -967,11 +999,12 @@ fn spawn_prepare<T: ?Sized + Send + Sync + 'static>(
     });
 }
 
-/// Downloads `slot`'s model into `models_dir`, reporting its progress at most once each
+/// Downloads `slot`'s model into `models_dir` from `base_url`, reporting its progress at most once each
 /// [`PROGRESS_INTERVAL`] but always at a new stage and at the end, and returns its folder.
 fn download<T: ?Sized>(
     slot: &Slot<T>,
     models_dir: &Path,
+    base_url: &str,
     output: &Output,
 ) -> Result<PathBuf, String> {
     let name = slot.model.name;
@@ -990,7 +1023,7 @@ fn download<T: ?Sized>(
         }
     };
     runtime
-        .block_on(models::download(&slot.model, models_dir, report))
+        .block_on(models::download(base_url, &slot.model, models_dir, report))
         .map_err(|error| format!("{name} couldn't be downloaded: {error}"))
 }
 
@@ -1080,12 +1113,12 @@ mod tests {
     struct FakeHearing;
 
     impl Hearing for FakeHearing {
-        fn transcribe(&self, speech: &Samples) -> Result<String, SpeechError> {
-            Ok(format!(
-                "{} samples at {} Hz",
-                speech.samples.len(),
-                speech.rate
-            ))
+        fn transcribe(&self, speech: &Samples, hotwords: &Hotwords) -> Result<String, SpeechError> {
+            let heard = format!("{} samples at {} Hz", speech.samples.len(), speech.rate);
+            Ok(match hotwords.is_empty() {
+                true => heard,
+                false => format!("{heard}, with {}", hotwords.joined()),
+            })
         }
     }
 
@@ -1366,6 +1399,31 @@ mod tests {
     }
 
     #[test]
+    fn the_clients_hotwords_reach_each_hearing_and_wrong_ones_are_refused() {
+        let (mut node, written) = ready_node(Duration::ZERO);
+        let recording = BASE64.encode([0u8; 16]);
+        let params = json!({"audio": recording, "format": "pcmF32", "sampleRate": 16000,
+            "hotwords": ["knight", "Ruy Lopez"]});
+        node.request(&request(1, "voice/transcribe", params));
+        let heard = written.response(1).result::<Transcribe>().unwrap();
+        assert_eq!(heard.text, "4 samples at 16000 Hz, with knight/Ruy Lopez");
+
+        let params = json!({"format": "pcmF32", "sampleRate": 16000, "endSilenceMs": 10,
+            "minSpeechMs": 5, "leadInMs": 0, "hotwords": ["bishop"]});
+        node.request(&request(2, "voice/listen", params));
+        send_audio(&mut node, 2, Some(audio(0.9, 320)), true);
+        assert!(written.response(2).result::<Listen>().is_ok());
+        let said = notifications(&written);
+        assert_eq!(said[1].1["text"], "320 samples at 16000 Hz, with bishop");
+
+        let bad = json!({"audio": recording, "format": "pcmF32", "sampleRate": 16000,
+            "hotwords": ["two\nlines"]});
+        node.request(&request(3, "voice/transcribe", bad));
+        let error = written.response(3).outcome.unwrap_err();
+        assert_eq!(error.code, code::INVALID_PARAMS, "{}", error.message);
+    }
+
+    #[test]
     fn a_cancelled_listen_drops_what_it_was_hearing_and_says_nothing_more() {
         let (mut node, written) = ready_node(Duration::ZERO);
         node.request(&quick_listen(2));
@@ -1402,7 +1460,11 @@ mod tests {
     }
 
     impl Hearing for SlowHearing {
-        fn transcribe(&self, _speech: &Samples) -> Result<String, SpeechError> {
+        fn transcribe(
+            &self,
+            _speech: &Samples,
+            _hotwords: &Hotwords,
+        ) -> Result<String, SpeechError> {
             thread::sleep(self.pause);
             Ok("Knight to f3.".to_string())
         }
@@ -1569,7 +1631,8 @@ mod tests {
 
     #[test]
     fn offline_a_missing_model_fails_and_says_why() {
-        let dir = std::env::temp_dir().join(format!("solrac-voice-offline-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("audio-chat-box-offline-{}", std::process::id()));
         let written = Written::default();
         let mut node = Node::new(
             Arc::new(Mutex::new(Box::new(written.clone()))),
@@ -1579,6 +1642,7 @@ mod tests {
                 transcription: Some(models::PARAKEET),
                 listening: Some(models::SILERO_VAD),
                 offline: true,
+                models_url: None,
             },
         );
         let init = json!({"protocol": "1.0", "client": {"name": "test", "version": "1"}});

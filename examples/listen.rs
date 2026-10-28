@@ -1,27 +1,29 @@
 //! Listens to WAV files as `voice/listen` would hear them streamed (cjus/chessgui#134): finds
 //! each utterance with Silero VAD, hears it with Parakeet, and says where each started and
-//! ended. For trying the end-of-turn settings on recordings, such as a move said with a pause
+//! ended. For trying a listen's settings on recordings, such as a command said with a pause
 //! in it ("knight to… f3").
 //!
 //! ```text
 //! cargo run --release --example listen -- \
-//!     <models folder> <file.wav>... [--end-silence MS] [--min-speech MS] [--no-lead-in]
+//!     <models folder> <file.wav>... [--end-silence MS] [--min-speech MS] [--lead-in MS]
+//!     [--hotwords FILE]
 //! ```
 //!
 //! The models folder holds the unpacked archives, such as Solrac's `…/Solrac/models`, with
 //! `silero-vad-v5` and `sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8` in it. The files must be
 //! 16 kHz. They are heard one after another, as one stream, a second of silence before each
-//! and after the last, in pieces of 100 ms, as Solrac sends them. `--no-lead-in` hears each
-//! utterance without the sound from before its start, as before cjus/chessgui#240.
+//! and after the last, in pieces of 100 ms, as Solrac sends them. The options are the
+//! listen's: `--lead-in 0` hears each utterance without the sound from before its start, as
+//! before cjus/chessgui#240, and `--hotwords FILE` gives the hotwords in `FILE`, one a line.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use solrac_voice::Samples;
-use solrac_voice::hear::{Transcriber, samples_of_wav};
-use solrac_voice::listen::{self, Detector, Event, Settings, Utterances};
-use solrac_voice::models::{PARAKEET, SILERO_VAD};
+use audio_chat_box::Samples;
+use audio_chat_box::hear::{Hotwords, Transcriber, samples_of_wav};
+use audio_chat_box::listen::{self, Detector, Event, Settings, Utterances};
+use audio_chat_box::models::{PARAKEET, SILERO_VAD};
 
 /// The silence put before each file and after the last.
 const GAP: Duration = Duration::from_secs(1);
@@ -44,16 +46,25 @@ fn millis(args: &mut Vec<String>, name: &str) -> Result<Option<u64>, String> {
 
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
-    let with_lead_in = match args.iter().position(|arg| arg == "--no-lead-in") {
-        Some(at) => {
-            args.remove(at);
-            false
+    let hotwords = match args.iter().position(|arg| arg == "--hotwords") {
+        Some(at) if at + 1 < args.len() => {
+            let path = args[at + 1].clone();
+            args.drain(at..=at + 1);
+            let read = std::fs::read_to_string(&path).map_err(|error| format!("{path}: {error}"));
+            match read.and_then(|text| Hotwords::of(&Hotwords::lines(&text))) {
+                Ok(hotwords) => hotwords,
+                Err(error) => {
+                    eprintln!("{error}");
+                    return ExitCode::FAILURE;
+                }
+            }
         }
-        None => true,
+        _ => Hotwords::none(),
     };
     let settings = millis(&mut args, "--end-silence").and_then(|end| {
         let min = millis(&mut args, "--min-speech")?;
-        Settings::from_millis(end, min, None)
+        let lead_in = millis(&mut args, "--lead-in")?;
+        Settings::from_millis(end, min, None, lead_in)
     });
     let settings = match settings {
         Ok(settings) => settings,
@@ -65,7 +76,7 @@ fn main() -> ExitCode {
     let [folder, files @ ..] = args.as_slice() else {
         eprintln!(
             "usage: listen <models folder> <file.wav>... [--end-silence MS] [--min-speech MS] \
-             [--no-lead-in]"
+             [--lead-in MS] [--hotwords FILE]"
         );
         return ExitCode::FAILURE;
     };
@@ -121,9 +132,9 @@ fn main() -> ExitCode {
     for piece in pieces {
         heard_to += piece.len();
         let events = session.hear(piece);
-        say(events, heard_to, with_lead_in, &transcriber, seconds);
+        say(events, heard_to, &hotwords, &transcriber, seconds);
     }
-    say(session.end(), heard_to, with_lead_in, &transcriber, seconds);
+    say(session.end(), heard_to, &hotwords, &transcriber, seconds);
     ExitCode::SUCCESS
 }
 
@@ -132,7 +143,7 @@ fn main() -> ExitCode {
 fn say(
     events: Vec<Event>,
     heard_to: usize,
-    with_lead_in: bool,
+    hotwords: &Hotwords,
     transcriber: &Transcriber,
     seconds: impl Fn(usize) -> f64,
 ) {
@@ -149,9 +160,6 @@ fn say(
                 mut lead_in,
             } => {
                 let end = start + samples.len();
-                if !with_lead_in {
-                    lead_in.clear();
-                }
                 lead_in.extend(samples);
                 let speech = Samples {
                     rate: listen::SAMPLE_RATE,
@@ -159,7 +167,7 @@ fn say(
                 };
                 let started = Instant::now();
                 let text = transcriber
-                    .transcribe(&speech)
+                    .transcribe(&speech, hotwords)
                     .unwrap_or_else(|e| e.to_string());
                 println!(
                     "{:6.2} s  heard {:.2}–{:.2} s in {:.2} s: {text:?}",

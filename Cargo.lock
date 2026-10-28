@@ -35,6 +35,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
+name = "audio-chat-box"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "bzip2 0.4.4",
+ "cnp",
+ "cnp-conformance",
+ "hound",
+ "reqwest",
+ "serde_json",
+ "sha2",
+ "sherpa-onnx",
+ "tar",
+ "tokio",
+]
+
+[[package]]
 name = "aws-lc-rs"
 version = "1.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -188,7 +205,7 @@ dependencies = [
 [[package]]
 name = "cnp"
 version = "0.1.0"
-source = "git+https://github.com/cjus/chess-node-protocol?rev=37af31c47a8c11e88a29a1d2e95d6520e5866432#37af31c47a8c11e88a29a1d2e95d6520e5866432"
+source = "git+https://github.com/cjus/chess-node-protocol?rev=0731fa56faf76ec232e1a88c3661cc4d12f4e7e4#0731fa56faf76ec232e1a88c3661cc4d12f4e7e4"
 dependencies = [
  "serde",
  "serde_json",
@@ -197,7 +214,7 @@ dependencies = [
 [[package]]
 name = "cnp-conformance"
 version = "0.1.0"
-source = "git+https://github.com/cjus/chess-node-protocol?rev=37af31c47a8c11e88a29a1d2e95d6520e5866432#37af31c47a8c11e88a29a1d2e95d6520e5866432"
+source = "git+https://github.com/cjus/chess-node-protocol?rev=0731fa56faf76ec232e1a88c3661cc4d12f4e7e4#0731fa56faf76ec232e1a88c3661cc4d12f4e7e4"
 dependencies = [
  "cnp",
  "serde_json",
@@ -1404,23 +1421,6 @@ checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "solrac-voice"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "bzip2 0.4.4",
- "cnp",
- "cnp-conformance",
- "hound",
- "reqwest",
- "serde_json",
- "sha2",
- "sherpa-onnx",
- "tar",
- "tokio",
 ]
 
 [[package]]

@@ -16,8 +16,8 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
-use solrac_voice::models::MODELS;
-use solrac_voice::speak::{Speaker, THREADS, voice_number};
+use audio_chat_box::models::MODELS;
+use audio_chat_box::speak::{Speaker, THREADS, voice_number};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();

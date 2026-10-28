@@ -1,7 +1,7 @@
-# cargo-about's settings for solrac-voice's third-party notices: `tools/notices.sh` runs it.
+# cargo-about's settings for audio-chat-box's third-party notices: `tools/notices.sh` runs it.
 # See https://embark-studios.github.io/cargo-about/
 
-# The licences solrac-voice takes its crates under, in order of preference: for a crate that
+# The licences audio-chat-box takes its crates under, in order of preference: for a crate that
 # offers a choice ("MIT OR Apache-2.0"), the first one here that it offers. The same licences
 # as `deny.toml`'s `allow`, which `cargo deny check` enforces.
 accepted = [
@@ -19,7 +19,7 @@ accepted = [
     "MPL-2.0",
 ]
 
-# The platforms solrac-voice is built for, as in `deny.toml`. One file covers all three.
+# The platforms audio-chat-box is built for, as in `deny.toml`. One file covers all three.
 targets = [
     "aarch64-apple-darwin",
     "x86_64-unknown-linux-gnu",

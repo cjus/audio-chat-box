@@ -326,7 +326,7 @@ mod tests {
 
     #[test]
     fn a_missing_file_is_named() {
-        let folder = std::env::temp_dir().join("solrac-voice-no-such-model");
+        let folder = std::env::temp_dir().join("audio-chat-box-no-such-model");
         match Speaker::load(&KOKORO_INT8, &folder) {
             Err(SpeechError::Missing(path)) => {
                 assert_eq!(path, folder.join(KOKORO_INT8.model_file));

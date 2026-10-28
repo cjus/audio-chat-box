@@ -1,5 +1,5 @@
 //! The Chess Node Protocol: every conformance session from the protocol's repository, played
-//! against the real `solrac-voice` program.
+//! against the real `audio-chat-box` program.
 //!
 //! The sessions come with the `cnp-conformance` crate ([`cnp_conformance::SESSIONS`]), so a
 //! new session there is checked here as soon as the protocol's pin is bumped. The node runs
@@ -18,9 +18,9 @@ const STEP_TIMEOUT: Duration = Duration::from_secs(60);
 /// The program, offline, listening, with a models folder that doesn't exist.
 fn node() -> Vec<String> {
     let models =
-        std::env::temp_dir().join(format!("solrac-voice-conformance-{}", std::process::id()));
+        std::env::temp_dir().join(format!("audio-chat-box-conformance-{}", std::process::id()));
     vec![
-        env!("CARGO_BIN_EXE_solrac-voice").to_string(),
+        env!("CARGO_BIN_EXE_audio-chat-box").to_string(),
         "--offline".to_string(),
         "--models".to_string(),
         models.to_string_lossy().into_owned(),
@@ -29,21 +29,29 @@ fn node() -> Vec<String> {
     ]
 }
 
+/// The domains whose sessions aren't for a voice node: an engine's, and a chess database's.
+const OTHER_DOMAINS: [&str; 4] = ["engine", "preferences", "games", "backups"];
+
 #[test]
-fn solrac_voice_passes_every_conformance_session_that_applies() {
+fn audio_chat_box_passes_every_conformance_session_that_applies() {
     let command = node();
     let mut sessions = session::load(&[PathBuf::from(SESSIONS)]).expect("the sessions load");
     assert!(sessions.len() >= 40, "only {} sessions", sessions.len());
     for session in &mut sessions {
         session.timeout = session.timeout.max(STEP_TIMEOUT);
     }
-    let offered = capabilities(&command, STEP_TIMEOUT).expect("solrac-voice answers initialize");
+    let offered = capabilities(&command, STEP_TIMEOUT).expect("audio-chat-box answers initialize");
     let (mut passed, mut failed, mut skipped) = (Vec::new(), Vec::new(), Vec::new());
     for session in &sessions {
         let needs = missing(session, &offered);
         if !needs.is_empty() {
-            // A voice node: the engine's sessions are for engines.
-            if !needs.iter().any(|need| need == "engine") {
+            // A voice node: the other domains' sessions are for other nodes.
+            let other = |need: &String| {
+                OTHER_DOMAINS
+                    .iter()
+                    .any(|domain| need == domain || need.starts_with(&format!("{domain}.")))
+            };
+            if !needs.iter().any(other) {
                 skipped.push(format!("{} (needs {})", session.name, needs.join(", ")));
             }
             continue;
@@ -62,6 +70,7 @@ fn solrac_voice_passes_every_conformance_session_that_applies() {
         "speak-unknown-voice",
         "transcribe-bad-audio",
         "listen-bad-params",
+        "hotwords-bad-params",
         "audio-for-no-listen",
     ] {
         assert!(

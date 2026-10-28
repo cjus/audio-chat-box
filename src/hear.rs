@@ -21,14 +21,16 @@
 //! [`samples_of_pcm_f32`] reads CNP's raw `pcmF32` audio, and [`Transcriber::transcribe`]
 //! hears them.
 //!
-//! ## Beam search and chess words
+//! ## Beam search and hotwords
 //!
 //! sherpa-onnx decodes greedily by default: at each step it keeps only the likeliest piece.
 //! A [`Transcriber`] keeps the [`BEAM`] likeliest transcripts instead (modified beam
-//! search), and gives a bonus of [`HOTWORD_SCORE`] for each piece of a [`HOTWORDS`] word
-//! ("knight", "kingside", "takes") that a transcript spells out. So when the sound is
-//! between "night" and "knight", or "pawn" and "on", the chess word wins; elsewhere the bonus
-//! is too small to matter. This is sherpa-onnx's contextual biasing: a trie of the hotwords'
+//! search), and gives a bonus of [`HOTWORD_SCORE`] for each piece of a hotword the client
+//! sent ([`Hotwords`]) that a transcript spells out. So when the sound is between "night"
+//! and "knight", or "pawn" and "on", the hotword wins; elsewhere the bonus is too small to
+//! matter. The client knows its domain and the node needn't: Solrac sends a chess move's
+//! words, another program its own. Until cjus/chessgui#226 the chess words were built in
+//! here. This is sherpa-onnx's contextual biasing: a trie of the hotwords'
 //! pieces with Aho-Corasick's failure links, walked along with each transcript (its docs
 //! below).
 //!
@@ -45,15 +47,17 @@
 //! room's echo and noise, on the M1 Max. Its greedy decoding already heard squares right
 //! more often than Whisper Large V3 Turbo (the model Solrac used through OpenRouter), Cohere
 //! Transcribe, Qwen3-ASR or Moonshine, in every condition measured; beam search with the
-//! hotwords cut its word errors on chess phrases from 8.3% to 4.4%. Its full-precision model
+//! chess words as hotwords cut its word errors on chess phrases from 8.3% to 4.4%. Its full-precision model
 //! was no better. Solrac's `docs/chat.md` has the tables. The recordings were made by speech
 //! synthesisers (macOS's and Kokoro), not people, so Carlos's own voice is the real test.
 //!
 //! ## Pitfalls
 //!
-//! - **"The knight is young."** The hotwords pull ordinary words towards chess ones when the
-//!   sound allows both. In a chess game that is the right way to be wrong. Raising
-//!   [`HOTWORD_SCORE`] makes it worse: at 2.0 the bake-off's chess phrases got worse too.
+//! - **"The knight is young."** Hotwords pull ordinary words towards them when the sound
+//!   allows both: in a chess game, the right way to be wrong. Raising [`HOTWORD_SCORE`] makes
+//!   it worse: at 2.0 the bake-off's chess phrases got worse too.
+//! - **"/" and ":" in a hotword.** sherpa-onnx splits hotwords at "/" and reads ":" as a
+//!   score, so [`Hotwords`] turns both into spaces.
 //! - **The vocabulary is made up.** A real SentencePiece vocabulary gives each piece a
 //!   score; `tokens.txt` has none, so [`vocabulary`] gives every piece the same, and a
 //!   hotword is split into the fewest pieces. The model may split a word differently, and
@@ -110,26 +114,64 @@ const DECODING_METHOD: &str = "modified_beam_search";
 /// bake-off, beam search alone cut word errors on chess phrases from 8.3% to 6.5%.
 pub const BEAM: i32 = 4;
 
-/// Words a player says in a chess game that Parakeet mishears without help: the pieces
-/// (but the king and queen, which it hears), castling and captures. Lower case and capital,
-/// as Parakeet writes either. A phrase is one hotword ("Ruy Lopez").
-pub const HOTWORDS: [&str; 15] = [
-    "knight",
-    "Knight",
-    "bishop",
-    "Bishop",
-    "rook",
-    "Rook",
-    "pawn",
-    "Pawn",
-    "castle",
-    "Castle",
-    "kingside",
-    "queenside",
-    "Ruy Lopez",
-    "takes",
-    "check",
-];
+/// The most hotwords one request may give: far more than the words of every legal move in a
+/// chess position. More is `InvalidParams`.
+pub const MAX_HOTWORDS: usize = 1000;
+
+/// Words and phrases a client expects to be said, as sherpa-onnx takes them (see the
+/// [module docs](self)).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Hotwords(String);
+
+impl Hotwords {
+    /// No hotwords.
+    pub fn none() -> Hotwords {
+        Hotwords::default()
+    }
+
+    /// The hotwords in `words`, or why they can't be taken (for an `InvalidParams` error): one
+    /// that is empty or holds a line break, or more than [`MAX_HOTWORDS`].
+    pub fn of(words: &[String]) -> Result<Hotwords, String> {
+        if words.len() > MAX_HOTWORDS {
+            return Err(format!("at most {MAX_HOTWORDS} hotwords"));
+        }
+        let mut taken = Vec::with_capacity(words.len());
+        for word in words {
+            if word.contains(['\n', '\r']) {
+                return Err(format!("the hotword {word:?} holds a line break"));
+            }
+            // sherpa-onnx splits at "/" and reads ":" as a score (module docs).
+            let word = word.replace(['/', ':', '\0'], " ");
+            let word = word.split_whitespace().collect::<Vec<_>>().join(" ");
+            if word.is_empty() {
+                return Err("a hotword is empty".to_string());
+            }
+            taken.push(word);
+        }
+        // sherpa-onnx reads one hotword a line, or with "/" between them.
+        Ok(Hotwords(taken.join("/")))
+    }
+
+    /// The hotwords as sherpa-onnx takes them: "/" between them.
+    pub fn joined(&self) -> &str {
+        &self.0
+    }
+
+    /// Whether there are none.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// The hotwords in a file's `text`, one a line, blank lines left out: for the examples'
+    /// `--hotwords FILE`.
+    pub fn lines(text: &str) -> Vec<String> {
+        text.lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(str::to_string)
+            .collect()
+    }
+}
 
 /// The bonus for each piece of a hotword (see the [module docs](self)). Measured in the
 /// bake-off: 1.0 was best on clean recordings, 1.5 on noisy ones, 1.25 close to the best on
@@ -139,8 +181,6 @@ pub const HOTWORD_SCORE: f32 = 1.25;
 /// Turns speech into text with [`PARAKEET`](crate::models::PARAKEET).
 pub struct Transcriber {
     recognizer: OfflineRecognizer,
-    /// [`HOTWORDS`], as sherpa-onnx takes them for each recording.
-    hotwords: String,
     /// Held while hearing, so one recording is heard at a time (module docs).
     hearing: Mutex<()>,
 }
@@ -184,21 +224,23 @@ impl Transcriber {
         let recognizer = OfflineRecognizer::create(&config).ok_or(SpeechError::WontLoad)?;
         Ok(Transcriber {
             recognizer,
-            // sherpa-onnx reads one hotword a line, or with "/" between them.
-            hotwords: HOTWORDS.join("/"),
             hearing: Mutex::new(()),
         })
     }
 
-    /// What is said in `speech`, trimmed: empty if nothing was heard. Waits while another
-    /// recording is being heard (module docs).
-    pub fn transcribe(&self, speech: &Samples) -> Result<String, SpeechError> {
+    /// What is said in `speech`, trimmed, with `hotwords` favoured: empty if nothing was
+    /// heard. Waits while another recording is being heard (module docs).
+    pub fn transcribe(&self, speech: &Samples, hotwords: &Hotwords) -> Result<String, SpeechError> {
         let _hearing = self.hearing.lock().unwrap_or_else(PoisonError::into_inner);
         let rate = i32::try_from(speech.rate).map_err(|_| SpeechError::Unreadable)?;
         if rate == 0 || speech.samples.is_empty() {
             return Ok(String::new());
         }
-        let stream = self.recognizer.create_stream_with_hotwords(&self.hotwords);
+        let stream = if hotwords.is_empty() {
+            self.recognizer.create_stream()
+        } else {
+            self.recognizer.create_stream_with_hotwords(&hotwords.0)
+        };
         stream.accept_waveform(rate, &speech.samples);
         self.recognizer.decode(&stream);
         let heard = stream.get_result().ok_or(SpeechError::Unheard)?;
@@ -221,7 +263,7 @@ pub fn vocabulary(tokens: &str) -> String {
 
 /// Writes the [`vocabulary`] of `tokens_file` into `folder`, unless it is there already, and
 /// returns its path. It is written under a name of its own (the process id) and then moved
-/// into place, so another solrac-voice never reads it half written.
+/// into place, so another audio-chat-box never reads it half written.
 fn write_vocabulary(folder: &Path, tokens_file: &str) -> Result<String, SpeechError> {
     let tokens = fs::read_to_string(tokens_file).map_err(|_| SpeechError::WontLoad)?;
     let vocabulary = vocabulary(&tokens);
@@ -343,17 +385,32 @@ mod tests {
     }
 
     #[test]
-    fn the_hotwords_are_one_word_or_phrase_each() {
-        for hotword in HOTWORDS {
-            assert_eq!(hotword.trim(), hotword);
-            // sherpa-onnx splits hotwords at a "/" or a new line, and reads ":" as a score.
-            assert!(!hotword.contains(['/', '\n', ':', '\0']), "{hotword}");
-        }
+    fn hotwords_are_taken_as_sherpa_onnx_reads_them() {
+        let words = |words: &[&str]| {
+            words
+                .iter()
+                .map(|word| word.to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            Hotwords::of(&words(&["knight", " Ruy  Lopez "])),
+            Ok(Hotwords("knight/Ruy Lopez".to_string()))
+        );
+        // sherpa-onnx would split at "/" and read ":" as a score.
+        assert_eq!(
+            Hotwords::of(&words(&["e4/e5", "ratio:2"])),
+            Ok(Hotwords("e4 e5/ratio 2".to_string()))
+        );
+        assert!(Hotwords::of(&[]).unwrap().is_empty());
+        assert!(Hotwords::of(&words(&[""])).is_err());
+        assert!(Hotwords::of(&words(&[" / "])).is_err());
+        assert!(Hotwords::of(&words(&["two\nwords"])).is_err());
+        assert!(Hotwords::of(&vec!["word".to_string(); MAX_HOTWORDS + 1]).is_err());
     }
 
     #[test]
     fn a_missing_file_is_named() {
-        let folder = std::env::temp_dir().join("solrac-voice-no-such-transcription-model");
+        let folder = std::env::temp_dir().join("audio-chat-box-no-such-transcription-model");
         match Transcriber::load(&PARAKEET, &folder) {
             Err(SpeechError::Missing(path)) => {
                 assert_eq!(path, folder.join(PARAKEET.model_file));

@@ -1,45 +1,59 @@
-//! The transcription bake-off (#59): how well a speech recogniser hears what a player says,
-//! and how fast, so that models can be compared before one is chosen. Parakeet was chosen
-//! with it (`docs/chat.md`, "Local transcription"), and Carlos asked that it stay, to try
-//! future models the same way: transcription quality comes first.
+//! The transcription bake-off (cjus/chessgui#59): how well a speech recogniser hears what
+//! people say to a product, and how fast, so that models can be compared before one is
+//! chosen. Parakeet was chosen with it for Solrac, on chess phrases (Solrac's `docs/chat.md`,
+//! "Local transcription"), and Carlos asked that it stay, to try future models the same way:
+//! transcription quality comes first.
 //!
 //! ```text
-//! tools/bakeoff/make-clips.sh /tmp/clips
 //! cargo run --release --example bakeoff -- \
-//!     <family> <model folder> /tmp/clips [--threads N] [--snr DB] [--beam]
-//!     [--hotwords SCORE] [--precision int8|fp16|fp32] [--misses]
+//!     <family> <model folder> <clips folder> [--threads N] [--snr DB] [--beam]
+//!     [--hotwords FILE] [--hotword-score SCORE] [--precision int8|fp16|fp32] [--misses]
 //! ```
 //!
 //! The model folder is one of sherpa-onnx's archives, unpacked
 //! (<https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models>). The family says how
 //! to run it:
 //!
-//! - `solrac`: Solrac's own `Transcriber` on a Parakeet folder, exactly as the chat hears.
+//! - `audio-chat-box`: this program's own `Transcriber` on a Parakeet folder, exactly as the
+//!   node hears.
 //! - `parakeet`: a NeMo transducer (`encoder`, `decoder`, `joiner`), such as Parakeet TDT.
-//!   `--beam` decodes with beam search, and `--hotwords SCORE` gives Solrac's chess words
-//!   that bonus (it needs `--beam`, and turns it on).
+//!   `--beam` decodes with beam search.
 //! - `whisper`: a Whisper encoder and decoder (`<name>-encoder…`), in English.
 //! - `moonshine`: Moonshine v2 (`encoder_model.ort`, `decoder_model_merged.ort`).
-//! - `qwen3`: Qwen3-ASR; `--hotwords` puts the chess words in its prompt (the score is
-//!   ignored).
+//! - `qwen3`: Qwen3-ASR; hotwords go in its prompt (the score is ignored).
 //! - `cohere`: Cohere Transcribe, in English.
+//!
+//! `--hotwords FILE` gives each clip the hotwords in `FILE`, one a line, as a client would
+//! (`audio-chat-box`, `parakeet`, which it switches to beam search, and `qwen3`), with
+//! `--hotword-score` as their bonus for a transducer (default `HOTWORD_SCORE`).
+//!
+//! ## The clips
+//!
+//! A clips folder holds `phrases.txt`, one phrase a line: its kind, what is said, and what
+//! should be heard, separated by "|" (`#` starts a comment). The kind is `command` (a short
+//! instruction in the product's domain, such as a chess move), `question` (a question in
+//! it), or `everyday` (a sentence outside it, to see what the domain's hotwords do to
+//! ordinary speech). Beside it, `<phrase number>-<anything>.wav` is a recording of that
+//! phrase (from 1, by line, comments and blank lines not counted), 16 kHz. Solrac's chess
+//! phrases and the script that records them in synthetic voices are in its repository
+//! (`tools/bakeoff/`, cjus/chessgui).
 //!
 //! ## What it measures
 //!
-//! The clips are `make-clips.sh`'s: each phrase of `tools/bakeoff/phrases.txt` in nine
-//! synthetic voices, at the window's 16 kHz. Each is heard once (after one untimed clip, to
+//! Each clip is heard once (after one untimed clip, to
 //! warm the model up), and scored against what should be heard:
 //!
 //! - **Word errors**: the words substituted, left out or added, as a share of the words
-//!   that should be heard (the edit distance), on the chess phrases and on the everyday
-//!   ones apart. Before comparing, text is lower-cased, punctuation dropped, number words
+//!   that should be heard (the edit distance), on the domain's phrases (commands and
+//!   questions) and on the everyday ones apart. Before comparing, text is lower-cased, punctuation dropped, number words
 //!   made digits ("five" is "5"), and a file letter followed by a rank made one square
 //!   ("f 3" is "f3"), so that "Knight to F3." and "knight to f three" both count as right.
-//! - **Squares**: of the clips whose phrase names squares, those in which the same squares
-//!   were heard in the same order, notation included ("Nf6" names f6). A misheard square is
-//!   a wrong move, so this matters most.
+//! - **Squares**, for chess phrases: of the clips whose phrase names squares, those in which
+//!   the same squares were heard in the same order, notation included ("Nf6" names f6). A
+//!   misheard square is a wrong move, so for chess this matters most. Left out when no phrase
+//!   names one.
 //! - **Exact**: the clips heard word for word.
-//! - **Time**: the mean time to hear a move and a question, and how many seconds of speech
+//! - **Time**: the mean time to hear a command and a question, and how many seconds of speech
 //!   it hears in a second.
 //!
 //! `--snr DB` makes a room of each clip first ([`room`]): two echoes and pink noise `DB`
@@ -48,7 +62,7 @@
 //! ## Pitfalls
 //!
 //! - **Synthetic voices are clean.** A person at a laptop's microphone is harder to hear,
-//!   so the bake-off compares models; it doesn't say how well one will hear Carlos.
+//!   so the bake-off compares models; it doesn't say how well one will hear a person.
 //! - **Time depends on the machine's load.** Run models one after another, not side by
 //!   side, and compare times from the same session.
 //! - **Compare models on one set of clips.** Kokoro's speech isn't the same twice (its
@@ -65,20 +79,20 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
 
+use audio_chat_box::Samples;
+use audio_chat_box::hear::{HOTWORD_SCORE, Hotwords, Transcriber, samples_of_wav, vocabulary};
+use audio_chat_box::models::PARAKEET;
+use audio_chat_box::speak::THREADS;
 use sherpa_onnx::{
     OfflineCohereTranscribeModelConfig, OfflineMoonshineModelConfig, OfflineQwen3ASRModelConfig,
     OfflineRecognizer, OfflineRecognizerConfig, OfflineTransducerModelConfig,
     OfflineWhisperModelConfig,
 };
-use solrac_voice::Samples;
-use solrac_voice::hear::{HOTWORDS, Transcriber, samples_of_wav, vocabulary};
-use solrac_voice::models::PARAKEET;
-use solrac_voice::speak::THREADS;
 
 /// The language the clips are in, for the models that are told.
 const LANGUAGE: &str = "en";
 
-/// How many transcripts beam search keeps (sherpa-onnx's default, as Solrac's `BEAM`).
+/// How many transcripts beam search keeps (sherpa-onnx's default, as the node's `BEAM`).
 const BEAM: i32 = 4;
 
 /// Below this, a sample is silence, not speech, when the speech's loudness is measured.
@@ -99,7 +113,9 @@ struct Options {
     threads: usize,
     snr: Option<f32>,
     beam: bool,
-    hotwords: Option<f32>,
+    /// The hotwords given with each clip, from `--hotwords`.
+    hotwords: Vec<String>,
+    hotword_score: f32,
     precision: String,
     misses: bool,
 }
@@ -107,7 +123,7 @@ struct Options {
 /// What kind of thing a phrase is.
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
-    Move,
+    Command,
     Question,
     Everyday,
 }
@@ -118,7 +134,7 @@ struct Phrase {
     expected: String,
 }
 
-/// Hears a clip: a sherpa-onnx recogniser, or Solrac's transcriber.
+/// Hears a clip: a sherpa-onnx recogniser, or this program's transcriber.
 enum Hearer {
     Sherpa {
         recognizer: OfflineRecognizer,
@@ -127,13 +143,15 @@ enum Hearer {
         /// Whether the clip's language is set on its stream (Cohere's way).
         language: bool,
     },
-    Solrac(Transcriber),
+    Own(Transcriber, Hotwords),
 }
 
 impl Hearer {
     fn hear(&self, samples: &Samples) -> String {
         match self {
-            Hearer::Solrac(transcriber) => transcriber.transcribe(samples).unwrap_or_default(),
+            Hearer::Own(transcriber, hotwords) => transcriber
+                .transcribe(samples, hotwords)
+                .unwrap_or_default(),
             Hearer::Sherpa {
                 recognizer,
                 hotwords,
@@ -217,9 +235,9 @@ fn run() -> Result<(), String> {
 
 /// The options in `args` (see the [module docs](self)).
 fn options(args: Vec<String>) -> Result<Options, String> {
-    const USAGE: &str = "usage: bakeoff <solrac|parakeet|whisper|moonshine|qwen3|cohere> \
-        <model folder> <clips folder> [--threads N] [--snr DB] [--beam] [--hotwords SCORE] \
-        [--precision int8|fp16|fp32] [--misses]";
+    const USAGE: &str = "usage: bakeoff <audio-chat-box|parakeet|whisper|moonshine|qwen3|cohere> \
+        <model folder> <clips folder> [--threads N] [--snr DB] [--beam] [--hotwords FILE] \
+        [--hotword-score SCORE] [--precision int8|fp16|fp32] [--misses]";
     let mut args = args.into_iter();
     let (Some(family), Some(folder), Some(clips)) = (args.next(), args.next(), args.next()) else {
         return Err(USAGE.to_string());
@@ -231,7 +249,8 @@ fn options(args: Vec<String>) -> Result<Options, String> {
         threads: THREADS,
         snr: None,
         beam: false,
-        hotwords: None,
+        hotwords: Vec::new(),
+        hotword_score: HOTWORD_SCORE,
         precision: "int8".to_string(),
         misses: false,
     };
@@ -246,9 +265,12 @@ fn options(args: Vec<String>) -> Result<Options, String> {
             "--snr" => options.snr = Some(number(value()?)?),
             "--beam" => options.beam = true,
             "--hotwords" => {
-                options.hotwords = Some(number(value()?)?);
+                let path = value()?;
+                let text = fs::read_to_string(&path).map_err(|error| format!("{path}: {error}"))?;
+                options.hotwords = Hotwords::lines(&text);
                 options.beam = true;
             }
+            "--hotword-score" => options.hotword_score = number(value()?)?,
             "--precision" => options.precision = value()?,
             "--misses" => options.misses = true,
             _ => return Err(format!("{flag}?\n{USAGE}")),
@@ -265,7 +287,7 @@ fn phrases(path: &Path) -> Result<Vec<Phrase>, String> {
         .map(|line| {
             let mut parts = line.split('|');
             let kind = match parts.next() {
-                Some("move") => Kind::Move,
+                Some("command") => Kind::Command,
                 Some("question") => Kind::Question,
                 Some("everyday") => Kind::Everyday,
                 _ => return Err(format!("{}: no kind in {line:?}", path.display())),
@@ -298,7 +320,7 @@ fn clips(folder: &Path, phrases: usize) -> Result<Vec<(usize, PathBuf)>, String>
     clips.sort();
     if clips.is_empty() {
         return Err(format!(
-            "no clips in {}: run make-clips.sh",
+            "no clips in {}: see the bake-off's docs, \"The clips\"",
             folder.display()
         ));
     }
@@ -308,9 +330,10 @@ fn clips(folder: &Path, phrases: usize) -> Result<Vec<(usize, PathBuf)>, String>
 /// The model in `options.folder`, ready to hear, as its family runs it.
 fn hearer(options: &Options) -> Result<Hearer, String> {
     let folder = &options.folder;
-    if options.family == "solrac" {
+    if options.family == "audio-chat-box" {
+        let hotwords = Hotwords::of(&options.hotwords)?;
         return Transcriber::load_with_threads(&PARAKEET, folder, options.threads)
-            .map(Hearer::Solrac)
+            .map(|transcriber| Hearer::Own(transcriber, hotwords))
             .map_err(|error| error.to_string());
     }
     let file = |name: &str| -> Result<Option<String>, String> {
@@ -341,18 +364,18 @@ fn hearer(options: &Options) -> Result<Hearer, String> {
                 config.decoding_method = Some("modified_beam_search".to_string());
                 config.max_active_paths = BEAM;
             }
-            if let Some(score) = options.hotwords {
-                // As Solrac's transcriber does: a vocabulary made from `tokens.txt`, here
+            if !options.hotwords.is_empty() {
+                // As the node's transcriber does: a vocabulary made from `tokens.txt`, here
                 // in the temporary folder rather than the model's.
                 let tokens = fs::read_to_string(folder.join("tokens.txt"))
                     .map_err(|error| error.to_string())?;
-                let vocabulary_file = std::env::temp_dir().join("solrac-bakeoff-bpe.vocab");
+                let vocabulary_file = std::env::temp_dir().join("audio-chat-box-bakeoff-bpe.vocab");
                 fs::write(&vocabulary_file, vocabulary(&tokens)).map_err(|e| e.to_string())?;
                 config.model_config.modeling_unit = Some("bpe".to_string());
                 config.model_config.bpe_vocab =
                     Some(vocabulary_file.to_string_lossy().into_owned());
-                config.hotwords_score = score;
-                hotwords = Some(HOTWORDS.join("/"));
+                config.hotwords_score = options.hotword_score;
+                hotwords = Some(options.hotwords.join("/"));
             }
         }
         "whisper" => {
@@ -388,7 +411,7 @@ fn hearer(options: &Options) -> Result<Hearer, String> {
                 encoder: file(&precise("encoder"))?,
                 decoder: file(&precise("decoder"))?,
                 tokenizer: file("tokenizer")?,
-                hotwords: options.hotwords.map(|_| HOTWORDS.join(",")),
+                hotwords: (!options.hotwords.is_empty()).then(|| options.hotwords.join(",")),
                 ..Default::default()
             };
             // Qwen3-ASR reads its own tokenizer; sherpa-onnx wants this empty.
@@ -419,16 +442,16 @@ fn hearer(options: &Options) -> Result<Hearer, String> {
 /// The scores so far (see the [module docs](self)).
 #[derive(Default)]
 struct Score {
-    /// Word errors and words expected, on chess phrases.
-    chess: (usize, usize),
+    /// Word errors and words expected, on the domain's phrases (commands and questions).
+    domain: (usize, usize),
     /// The same, on everyday phrases.
     everyday: (usize, usize),
     /// Clips whose squares were all heard, and clips that name squares.
     squares: (usize, usize),
     /// Clips heard word for word, and clips.
     exact: (usize, usize),
-    /// Seconds spent hearing moves, and how many.
-    moves: (f64, usize),
+    /// Seconds spent hearing commands, and how many.
+    commands: (f64, usize),
     /// The same, for questions.
     questions: (f64, usize),
     /// Seconds of speech heard, and seconds spent hearing it.
@@ -443,7 +466,7 @@ impl Score {
         let errors = edit_distance(&expected, &got);
         let tally = match phrase.kind {
             Kind::Everyday => &mut self.everyday,
-            Kind::Move | Kind::Question => &mut self.chess,
+            Kind::Command | Kind::Question => &mut self.domain,
         };
         tally.0 += errors;
         tally.1 += expected.len();
@@ -455,7 +478,7 @@ impl Score {
         self.exact.0 += usize::from(errors == 0);
         self.exact.1 += 1;
         let time = match phrase.kind {
-            Kind::Move => Some(&mut self.moves),
+            Kind::Command => Some(&mut self.commands),
             Kind::Question => Some(&mut self.questions),
             Kind::Everyday => None,
         };
@@ -472,16 +495,18 @@ impl Score {
     fn summary(&self) -> String {
         let share = |(part, whole): (usize, usize)| 100.0 * part as f64 / whole.max(1) as f64;
         let mean = |(sum, count): (f64, usize)| sum / count.max(1) as f64;
+        let squares = match self.squares {
+            (_, 0) => String::new(),
+            (right, of) => format!(", squares right in {right}/{of}"),
+        };
         format!(
-            "chess phrases {:.1}% word errors, squares right in {}/{}; everyday {:.1}%; \
-             {}/{} exact; {:.2} s a move, {:.2} s a question, {:.1}x real time",
-            share(self.chess),
-            self.squares.0,
-            self.squares.1,
+            "domain phrases {:.1}% word errors{squares}; everyday {:.1}%; \
+             {}/{} exact; {:.2} s a command, {:.2} s a question, {:.1}x real time",
+            share(self.domain),
             share(self.everyday),
             self.exact.0,
             self.exact.1,
-            mean(self.moves),
+            mean(self.commands),
             mean(self.questions),
             self.speech.0 / self.speech.1.max(f64::EPSILON)
         )

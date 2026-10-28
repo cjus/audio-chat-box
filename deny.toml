@@ -2,7 +2,7 @@
 # See https://embarkstudios.github.io/cargo-deny/
 
 [graph]
-# Only the platforms solrac-voice is built for, with Solrac. Without a list, cargo-deny checks
+# Only the platforms audio-chat-box is built for, with Solrac. Without a list, cargo-deny checks
 # every platform's dependencies.
 targets = [
     "aarch64-apple-darwin",
@@ -17,12 +17,12 @@ ignore = [
     # in the program, and sherpa-onnx-sys requires these major versions. CI downloads the
     # library itself and checks its SHA-256 before the build script sees it (ci.yml). Look at
     # them again with each sherpa-onnx upgrade. (The same as Solrac's, cjus/chessgui#59.)
-    { id = "RUSTSEC-2026-0367", reason = "zip 2 unpacks only iOS archives in sherpa-onnx-sys's build script; solrac-voice isn't built for iOS" },
-    { id = "RUSTSEC-2026-0368", reason = "zip 2 unpacks only iOS archives in sherpa-onnx-sys's build script; solrac-voice isn't built for iOS" },
-    { id = "RUSTSEC-2026-0369", reason = "zip 2 unpacks only iOS archives in sherpa-onnx-sys's build script; solrac-voice isn't built for iOS" },
-    { id = "RUSTSEC-2026-0391", reason = "zstd decompresses for zip 2, which unpacks only iOS archives in sherpa-onnx-sys's build script; solrac-voice isn't built for iOS" },
-    { id = "RUSTSEC-2026-0398", reason = "zstd decompresses for zip 2, which unpacks only iOS archives in sherpa-onnx-sys's build script; solrac-voice isn't built for iOS" },
-    { id = "RUSTSEC-2026-0403", reason = "zstd decompresses for zip 2, which unpacks only iOS archives in sherpa-onnx-sys's build script; solrac-voice isn't built for iOS" },
+    { id = "RUSTSEC-2026-0367", reason = "zip 2 unpacks only iOS archives in sherpa-onnx-sys's build script; audio-chat-box isn't built for iOS" },
+    { id = "RUSTSEC-2026-0368", reason = "zip 2 unpacks only iOS archives in sherpa-onnx-sys's build script; audio-chat-box isn't built for iOS" },
+    { id = "RUSTSEC-2026-0369", reason = "zip 2 unpacks only iOS archives in sherpa-onnx-sys's build script; audio-chat-box isn't built for iOS" },
+    { id = "RUSTSEC-2026-0391", reason = "zstd decompresses for zip 2, which unpacks only iOS archives in sherpa-onnx-sys's build script; audio-chat-box isn't built for iOS" },
+    { id = "RUSTSEC-2026-0398", reason = "zstd decompresses for zip 2, which unpacks only iOS archives in sherpa-onnx-sys's build script; audio-chat-box isn't built for iOS" },
+    { id = "RUSTSEC-2026-0403", reason = "zstd decompresses for zip 2, which unpacks only iOS archives in sherpa-onnx-sys's build script; audio-chat-box isn't built for iOS" },
 ]
 
 [licenses]

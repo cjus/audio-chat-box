@@ -1,29 +1,38 @@
-//! # solrac-voice: Solrac's voice, as a program of its own
+//! # audio-chat-box: speech for programs that talk with people
 //!
-//! Solrac's chat hears the player and reads its replies aloud. This program does both on the
-//! computer it runs on, with sherpa-onnx on the CPU, and answers the Chess Node Protocol's
-//! voice domain (CNP, spec section 8) over its standard input and output:
+//! A program that talks with people reads its replies aloud and hears what they say. This
+//! program does both on the computer it runs on, with sherpa-onnx on the CPU, and answers its
+//! client over its standard input and output (`docs/protocol.md`, the Chess Node Protocol's
+//! voice domain):
 //!
 //! - [`speak`]: Kokoro v1.0 reads text aloud, in any of its voices.
-//! - [`hear`]: Parakeet TDT 0.6B v2 turns speech into text, with chess words favoured.
-//! - [`listen`]: Silero VAD finds speech in audio as it comes, for Solrac's hands-free voice
-//!   (cjus/chessgui#134): the node hears each utterance once the speaker pauses.
-//! - [`models`]: the models, downloaded once from the PNX Studios CDN, checked and unpacked.
-//! - [`node`]: the CNP node. Requests come in, and answers and the models' progress go out.
+//! - [`hear`]: Parakeet TDT 0.6B v2 turns speech into text, with the client's hotwords
+//!   favoured.
+//! - [`listen`]: Silero VAD finds speech in audio as it comes, for a client that keeps its
+//!   microphone open (cjus/chessgui#134): the node hears each utterance once the speaker
+//!   pauses.
+//! - [`models`]: the models, downloaded once, checked and unpacked.
+//! - [`node`]: the node. Requests come in, and answers and the models' progress go out.
 //!
-//! It never touches a microphone or a speaker: the client records and plays. Solrac starts it,
-//! hands it the folder its models live in, and asks it for speech and transcripts.
+//! It never touches a microphone or a speaker: the client records and plays. The client
+//! starts it, hands it the folder its models live in, and asks it for speech and transcripts.
+//! It knows nothing of the client's domain: the client says which words to expect.
 //!
 //! ## Why a program of its own
 //!
 //! sherpa-onnx's library includes eSpeak NG (GPL-3.0-or-later), which Kokoro uses to sound out
-//! words its lexicon doesn't have. Linked into Solrac, it would make Solrac GPL. As a separate
-//! program that Solrac starts and talks to through a public protocol, it doesn't
-//! (cjus/chessgui#71; the design is `docs/protocol.md` there). Our own code here is
-//! `MIT OR Apache-2.0`; the program as built is GPL-3.0-or-later.
+//! words its lexicon doesn't have. Linked into a closed-source program, it would make that
+//! program GPL. As a separate program that the client starts and talks to through a public
+//! protocol, it doesn't (cjus/chessgui#71). Our own code here is `MIT OR Apache-2.0`; the
+//! program as built is GPL-3.0-or-later.
 //!
-//! The code came from Solrac's `chessgui-speech` and `chessgui-agent`'s download
-//! (cjus/chessgui#59, #69, #92), in step 6 of M1b (cjus/chessgui#98).
+//! ## Origins
+//!
+//! It began as `solrac-voice`, the voice of Solrac, a chess board (`cjus/chessgui`): its code
+//! came from Solrac's `chessgui-speech` and `chessgui-agent`'s download (cjus/chessgui#59,
+//! #69, #92), in step 6 of M1b (cjus/chessgui#98). The comments cite those issues as the
+//! history of each choice. It became audio-chat-box once the chess words it favoured moved
+//! to the client (cjus/chessgui#226), so that any program can use it.
 //!
 //! sherpa-onnx (Apache-2.0): <https://github.com/k2-fsa/sherpa-onnx>. Kokoro (Apache-2.0):
 //! <https://huggingface.co/hexgrad/Kokoro-82M>. Parakeet TDT 0.6B v2 (CC-BY-4.0):

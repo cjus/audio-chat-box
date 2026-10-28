@@ -1,9 +1,11 @@
-//! The models: Kokoro to speak, Parakeet to hear, Silero VAD to listen, downloaded once from
-//! the PNX Studios CDN, checked, and unpacked into the models folder Solrac names
-//! (`--models`).
+//! The models: Kokoro to speak, Parakeet to hear, Silero VAD to listen, downloaded once,
+//! checked, and unpacked into the models folder the client names (`--models`).
 //!
-//! A [`LocalModel`] is one of sherpa-onnx's archives, copied unchanged to the CDN at
-//! [`MODELS_URL`]; Silero VAD, which comes as a bare file, is packed the same way by
+//! A [`LocalModel`] is one of sherpa-onnx's archives, copied unchanged to this repository's
+//! `models-v1` release at [`MODELS_URL`], or to any address the client prefers
+//! (`--models-url`: Solrac's is on the PNX Studios CDN). sherpa-onnx's own releases aren't
+//! used: its Kokoro archives have changed since these were taken, and the checksums below
+//! pin these. Silero VAD, which comes as a bare file, is packed the same way by
 //! `tools/pack-silero-vad.sh`. [`download`] makes sure it is unpacked in the models folder, and returns
 //! its folder:
 //!
@@ -12,7 +14,7 @@
 //! 2. Otherwise the archive is downloaded into the models folder, and its SHA-256 is worked
 //!    out as it arrives.
 //! 3. Its size and SHA-256 must be the ones built into this program ([`MODELS`]). A file that
-//!    differs, whether cut short or changed on the CDN or on its way, is deleted and never
+//!    differs, whether cut short or changed where it is kept or on its way, is deleted and never
 //!    unpacked ([`check`]).
 //! 4. It is unpacked into a folder of its own, which is then moved into place in one step
 //!    ([`unpack`]), and the archive is deleted.
@@ -49,13 +51,16 @@ use std::time::{Duration, SystemTime};
 use cnp::voice::{ModelPurpose, ModelState, Stage};
 use sha2::{Digest, Sha256};
 
-/// Where the models are on the PNX Studios CDN.
-pub const MODELS_URL: &str = "https://cdn.pnxstudios.com/solrac/models/";
+/// Where the models are downloaded from unless the node is told otherwise (`--models-url`):
+/// this repository's `models-v1` release, which holds each archive unchanged, as
+/// [`MODELS`] lists it. GitHub serves its releases' files at no charge. Solrac downloads from
+/// its own copy, on the PNX Studios CDN.
+pub const MODELS_URL: &str = "https://github.com/cjus/audio-chat-box/releases/download/models-v1/";
 
 /// How long the download may go without data before it fails.
 pub const STALL: Duration = Duration::from_secs(30);
 
-/// How long connecting to the CDN may take.
+/// How long connecting to where the models are may take.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// How often a download reports how far it has got: each time this many more bytes have
@@ -195,20 +200,10 @@ pub fn is_ready(model: &LocalModel, models_dir: &Path) -> bool {
     folder(model, models_dir).join(model.model_file).is_file()
 }
 
-/// Makes sure `model` is unpacked in `models_dir`, downloading it if it isn't there (see the
-/// [module docs](self)), and returns its folder. Tells `progress` how far it has got; a model
-/// already there reports nothing.
+/// Makes sure `model` is unpacked in `models_dir`, downloading it from `base_url` (such as
+/// [`MODELS_URL`], ending in `/`) if it isn't there (see the [module docs](self)), and returns
+/// its folder. Tells `progress` how far it has got; a model already there reports nothing.
 pub async fn download(
-    model: &LocalModel,
-    models_dir: &Path,
-    progress: impl FnMut(ModelState),
-) -> Result<PathBuf, DownloadError> {
-    download_from(MODELS_URL, model, models_dir, progress).await
-}
-
-/// [`download`], from `base_url` in place of [`MODELS_URL`]: in tests, a server on this
-/// computer.
-async fn download_from(
     base_url: &str,
     model: &LocalModel,
     models_dir: &Path,
@@ -347,7 +342,7 @@ pub fn unpack(
         let folder = folder(model, models_dir);
         match fs::rename(&unpacked, &folder) {
             Ok(()) => Ok(folder),
-            // Another solrac-voice got there first.
+            // Another audio-chat-box got there first.
             Err(_) if is_ready(model, models_dir) => Ok(folder),
             Err(error) => Err(DownloadError::disk(error)),
         }
@@ -443,7 +438,7 @@ mod tests {
     impl TempDir {
         fn new(name: &str) -> TempDir {
             let path = std::env::temp_dir().join(format!(
-                "solrac-voice-download-{}-{name}",
+                "audio-chat-box-download-{}-{name}",
                 std::process::id()
             ));
             let _ = fs::remove_dir_all(&path);
@@ -563,7 +558,7 @@ mod tests {
             .collect();
         assert!(left.is_empty(), "{left:?}");
 
-        // A second solrac-voice that unpacks too keeps the folder there.
+        // A second audio-chat-box that unpacks too keeps the folder there.
         assert_eq!(unpack(&path, &model, &dir.0), Ok(folder));
     }
 
@@ -634,7 +629,7 @@ mod tests {
             .enable_all()
             .build()
             .unwrap()
-            .block_on(download_from(&url, &model, &models_dir, |stage| {
+            .block_on(download(&url, &model, &models_dir, |stage| {
                 stages.push(stage)
             }))
             .unwrap();
@@ -668,7 +663,7 @@ mod tests {
         tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap()
-            .block_on(download_from(&url, &model, &models_dir, |stage| {
+            .block_on(download(&url, &model, &models_dir, |stage| {
                 again.push(stage)
             }))
             .unwrap();

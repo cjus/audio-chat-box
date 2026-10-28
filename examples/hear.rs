@@ -4,21 +4,22 @@
 //!
 //! ```text
 //! cargo run --release --example hear -- \
-//!     <model folder> <file.wav>... [--threads N]
+//!     <model folder> <file.wav>... [--threads N] [--hotwords FILE]
 //! ```
 //!
 //! The model folder is an unpacked archive, such as Solrac's
-//! `…/models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8`. Each file is heard as the chat
-//! hears a spoken message: with beam search and the chess hotwords.
+//! `…/models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8`. Each file is heard as
+//! `voice/transcribe` hears it: with beam search, and the hotwords in `FILE` (one a line), if
+//! given.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Instant;
 
+use audio_chat_box::hear::{Hotwords, Transcriber, samples_of_wav};
+use audio_chat_box::models::MODELS;
+use audio_chat_box::speak::THREADS;
 use cnp::voice::ModelPurpose;
-use solrac_voice::hear::{Transcriber, samples_of_wav};
-use solrac_voice::models::MODELS;
-use solrac_voice::speak::THREADS;
 
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
@@ -30,8 +31,23 @@ fn main() -> ExitCode {
         }
         _ => THREADS,
     };
+    let hotwords = match args.iter().position(|arg| arg == "--hotwords") {
+        Some(at) if at + 1 < args.len() => {
+            let path = args[at + 1].clone();
+            args.drain(at..=at + 1);
+            let read = std::fs::read_to_string(&path).map_err(|error| format!("{path}: {error}"));
+            match read.and_then(|text| Hotwords::of(&Hotwords::lines(&text))) {
+                Ok(hotwords) => hotwords,
+                Err(error) => {
+                    eprintln!("{error}");
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+        _ => Hotwords::none(),
+    };
     let [folder, files @ ..] = args.as_slice() else {
-        eprintln!("usage: hear <model folder> <file.wav>... [--threads N]");
+        eprintln!("usage: hear <model folder> <file.wav>... [--threads N] [--hotwords FILE]");
         return ExitCode::FAILURE;
     };
     let folder = PathBuf::from(folder);
@@ -70,7 +86,7 @@ fn main() -> ExitCode {
             }
         };
         let started = Instant::now();
-        match transcriber.transcribe(&samples) {
+        match transcriber.transcribe(&samples, &hotwords) {
             Ok(text) => println!(
                 "{file}: {:.1} s heard in {:.2} s: {text:?}",
                 samples.duration().as_secs_f64(),

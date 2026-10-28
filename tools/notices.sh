@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Writes the third-party notices that go with every copy of the solrac-voice program, into
+# Writes the third-party notices that go with every copy of the audio-chat-box program, into
 # target/licences/THIRD-PARTY-NOTICES.txt.
 #
 #   tools/notices.sh
 #
-# The licences of what solrac-voice is built with ask that their notices go with every copy:
+# The licences of what audio-chat-box is built with ask that their notices go with every copy:
 # the MIT and BSD licences' copyright lines, Apache-2.0's NOTICE files. This gathers them:
 #
 # - every crate, with cargo-about (tools/notices/about.toml and the template
@@ -14,8 +14,8 @@
 # - the C and C++ libraries inside sherpa-onnx's prebuilt library, whose licences no crate
 #   carries: licences/, which says where each came from (licences/README.md).
 #
-# Solrac, which ships solrac-voice beside it (cjus/chessgui#98), is to take this file with
-# the program. Needs cargo-about 0.9 (cargo install --locked cargo-about@0.9.2 --features cli)
+# A product that ships audio-chat-box beside it, as Solrac does (cjus/chessgui#98), takes
+# this file with the program. Needs cargo-about 0.9 (cargo install --locked cargo-about@0.9.2 --features cli)
 # and the network: it fetches, from a crate's repository, the licence files the crate didn't
 # package.
 set -euo pipefail
