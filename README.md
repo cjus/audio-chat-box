@@ -2,7 +2,7 @@
 
 Add the ability to speak with your AI project • hands free • offline • local-first
 
-![audio-chat-box](audio-chat-box.png)
+![audio-chat-box](audio-chat-box.jpg)
 
 Speech for a program that talks with people, on the computer it runs on. audio-chat-box
 reads text aloud with [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M), turns speech into
