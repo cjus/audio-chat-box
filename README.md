@@ -66,15 +66,15 @@ says where each came from.
 
 ## Origins
 
-audio-chat-box began as `solrac-voice`, the voice of [Solrac](https://github.com/cjus/solrac-chess),
-a 3D chess board that teaches, made in its repository `cjus/chessgui`. Solrac's chat reads its
-replies aloud and hears its player, by Talk or hands-free, and this program grew out of that
-work: its models were chosen in Solrac's bake-off of speech recognisers, its listening was
-tuned on a player's moves said at speed-chess pace, and its protocol is the voice domain of
-the [Chess Node Protocol](https://github.com/cjus/chess-node-protocol), which Solrac speaks to
-all its modules. The comments still cite those projects' issues (`cjus/chessgui#…`), as the
-history of why each choice was made. It was renamed in October 2026, once what was chess in
-it, the words it favoured, had moved to the client, so that any product can use it.
+audio-chat-box began as `solrac-voice`, the voice of [Solrac](https://solrac-chess.com), an
+AI-based Chess Coach. Solrac's chat reads its replies aloud and hears its player, by Talk or
+hands-free, and this program grew out of that work: its models were chosen in Solrac's
+bake-off of speech recognisers, its listening was tuned on a player's moves said at
+speed-chess pace, and its protocol is the voice domain of the
+[Chess Node Protocol](https://github.com/cjus/chess-node-protocol), which Solrac speaks to all
+its modules. The comments still cite Solrac's issues (`cjus/chessgui#…`), as the history of
+why each choice was made. It was renamed in October 2026, once what was chess in it, the words
+it favoured, had moved to the client, so that any product can use it.
 
 ## Licence
 
