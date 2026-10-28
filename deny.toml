@@ -20,6 +20,9 @@ ignore = [
     { id = "RUSTSEC-2026-0367", reason = "zip 2 unpacks only iOS archives in sherpa-onnx-sys's build script; solrac-voice isn't built for iOS" },
     { id = "RUSTSEC-2026-0368", reason = "zip 2 unpacks only iOS archives in sherpa-onnx-sys's build script; solrac-voice isn't built for iOS" },
     { id = "RUSTSEC-2026-0369", reason = "zip 2 unpacks only iOS archives in sherpa-onnx-sys's build script; solrac-voice isn't built for iOS" },
+    { id = "RUSTSEC-2026-0391", reason = "zstd decompresses for zip 2, which unpacks only iOS archives in sherpa-onnx-sys's build script; solrac-voice isn't built for iOS" },
+    { id = "RUSTSEC-2026-0398", reason = "zstd decompresses for zip 2, which unpacks only iOS archives in sherpa-onnx-sys's build script; solrac-voice isn't built for iOS" },
+    { id = "RUSTSEC-2026-0403", reason = "zstd decompresses for zip 2, which unpacks only iOS archives in sherpa-onnx-sys's build script; solrac-voice isn't built for iOS" },
 ]
 
 [licenses]

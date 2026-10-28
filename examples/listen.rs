@@ -5,13 +5,14 @@
 //!
 //! ```text
 //! cargo run --release --example listen -- \
-//!     <models folder> <file.wav>... [--end-silence MS] [--min-speech MS]
+//!     <models folder> <file.wav>... [--end-silence MS] [--min-speech MS] [--no-lead-in]
 //! ```
 //!
 //! The models folder holds the unpacked archives, such as Solrac's `…/Solrac/models`, with
 //! `silero-vad-v5` and `sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8` in it. The files must be
 //! 16 kHz. They are heard one after another, as one stream, a second of silence before each
-//! and after the last, in pieces of 100 ms, as Solrac sends them.
+//! and after the last, in pieces of 100 ms, as Solrac sends them. `--no-lead-in` hears each
+//! utterance without the sound from before its start, as before cjus/chessgui#240.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -43,6 +44,13 @@ fn millis(args: &mut Vec<String>, name: &str) -> Result<Option<u64>, String> {
 
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let with_lead_in = match args.iter().position(|arg| arg == "--no-lead-in") {
+        Some(at) => {
+            args.remove(at);
+            false
+        }
+        None => true,
+    };
     let settings = millis(&mut args, "--end-silence").and_then(|end| {
         let min = millis(&mut args, "--min-speech")?;
         Settings::from_millis(end, min, None)
@@ -56,7 +64,8 @@ fn main() -> ExitCode {
     };
     let [folder, files @ ..] = args.as_slice() else {
         eprintln!(
-            "usage: listen <models folder> <file.wav>... [--end-silence MS] [--min-speech MS]"
+            "usage: listen <models folder> <file.wav>... [--end-silence MS] [--min-speech MS] \
+             [--no-lead-in]"
         );
         return ExitCode::FAILURE;
     };
@@ -112,16 +121,18 @@ fn main() -> ExitCode {
     for piece in pieces {
         heard_to += piece.len();
         let events = session.hear(piece);
-        say(events, heard_to, &transcriber, seconds);
+        say(events, heard_to, with_lead_in, &transcriber, seconds);
     }
-    say(session.end(), heard_to, &transcriber, seconds);
+    say(session.end(), heard_to, with_lead_in, &transcriber, seconds);
     ExitCode::SUCCESS
 }
 
-/// Prints what the detector found by `heard_to` samples, each utterance heard.
+/// Prints what the detector found by `heard_to` samples, each utterance heard, with its
+/// lead-in or without.
 fn say(
     events: Vec<Event>,
     heard_to: usize,
+    with_lead_in: bool,
     transcriber: &Transcriber,
     seconds: impl Fn(usize) -> f64,
 ) {
@@ -132,11 +143,19 @@ fn say(
                 seconds(heard_to),
                 seconds(at)
             ),
-            Event::Ended { start, samples } => {
+            Event::Ended {
+                start,
+                samples,
+                mut lead_in,
+            } => {
                 let end = start + samples.len();
+                if !with_lead_in {
+                    lead_in.clear();
+                }
+                lead_in.extend(samples);
                 let speech = Samples {
                     rate: listen::SAMPLE_RATE,
-                    samples,
+                    samples: lead_in,
                 };
                 let started = Instant::now();
                 let text = transcriber
