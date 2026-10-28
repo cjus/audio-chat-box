@@ -1,5 +1,7 @@
 # audio-chat-box
 
+Add the ability to speak with your AI project • hands free • offline • local-first
+
 ![audio-chat-box](audio-chat-box.png)
 
 Speech for a program that talks with people, on the computer it runs on. audio-chat-box
