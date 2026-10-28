@@ -61,5 +61,5 @@ allow-wildcard-paths = true
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-# The Chess Node Protocol's types and conformance tests, from their own (private) repository.
+# The Chess Node Protocol's types and conformance tests, from their own repository.
 allow-git = ["https://github.com/cjus/chess-node-protocol"]

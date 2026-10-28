@@ -52,22 +52,6 @@ jobs:
           fi
           echo "build=$build" >> "$GITHUB_OUTPUT"
           echo "Build, test and check licences: $build."
-      # The Chess Node Protocol's crates live in a private repository: fetch them over SSH with
-      # a read-only deploy key (cjus/chessgui#105). The key's comment is the repository's
-      # address, which the agent uses to pick it for that repository.
-      - name: Check the protocol's deploy key is set
-        if: steps.scope.outputs.build == 'true'
-        env:
-          KEY: ${{ secrets.CNP_DEPLOY_KEY }}
-        run: |
-          if [ -z "$KEY" ]; then
-            echo "::error::The CNP_DEPLOY_KEY secret is missing, so CI can't fetch the cnp crate from cjus/chess-node-protocol (private). See cjus/chessgui#105."
-            exit 1
-          fi
-      - uses: webfactory/ssh-agent@v0.9.1
-        if: steps.scope.outputs.build == 'true'
-        with:
-          ssh-private-key: ${{ secrets.CNP_DEPLOY_KEY }}
       - name: Install the toolchain from rust-toolchain.toml
         if: steps.scope.outputs.build == 'true'
         run: rustup toolchain install
