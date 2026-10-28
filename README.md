@@ -99,3 +99,5 @@ crates' licences (with cargo-about 0.9: `cargo install --locked cargo-about@0.9.
 cli`), then those of the C and C++ libraries in sherpa-onnx's prebuilt library, which the
 archive doesn't carry, so they are kept in [`licences/`](licences/README.md) with where each
 came from.
+
+Copyright (c) 2026 Carlos Justiniano.
