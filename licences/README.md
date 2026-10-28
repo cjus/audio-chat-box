@@ -1,6 +1,6 @@
 # The native libraries' licences
 
-sherpa-onnx's build script links a prebuilt static library into `solrac-voice` (the
+sherpa-onnx's build script links a prebuilt static library into `audio-chat-box` (the
 `sherpa-onnx` pin in `Cargo.toml`, checked by its SHA-256 in CI). That archive holds the
 compiled libraries below and none of their licence files, so their licences are kept here,
 each taken from the project's source at the version sherpa-onnx 1.13.8's CMake files build

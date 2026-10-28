@@ -1,18 +1,18 @@
 [package]
-name = "solrac-voice"
-description = "Solrac's voice as a program of its own: Kokoro reads text aloud and Parakeet hears speech, on this computer, behind the Chess Node Protocol's voice domain."
+name = "audio-chat-box"
+description = "Speech for programs that talk with people, on the computer they run on: Kokoro reads text aloud, Parakeet hears speech and Silero VAD finds it as it comes, through sherpa-onnx, as a program of its own over standard input and output."
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.97.1"
 # Our own code. The program as built links eSpeak NG (GPL-3.0-or-later) through sherpa-onnx,
-# so the `solrac-voice` binary as a whole is GPL-3.0-or-later (README, "Licence").
+# so the `audio-chat-box` binary as a whole is GPL-3.0-or-later (README, "Licence").
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/cjus/solrac-voice"
+repository = "https://github.com/cjus/audio-chat-box"
 publish = false
 
 [dependencies]
 # The Chess Node Protocol's types (`MIT OR Apache-2.0`), pinned to a commit on its `main`.
-cnp = { git = "https://github.com/cjus/chess-node-protocol", rev = "37af31c47a8c11e88a29a1d2e95d6520e5866432" }
+cnp = { git = "https://github.com/cjus/chess-node-protocol", rev = "0731fa56faf76ec232e1a88c3661cc4d12f4e7e4" }
 # sherpa-onnx (Apache-2.0), k2-fsa's speech toolkit: Kokoro and Parakeet through ONNX
 # Runtime. Pinned exactly: its build script downloads the prebuilt library of the same
 # version (about 20 MB, with ONNX Runtime and eSpeak NG linked in) and links it statically. CI
@@ -35,7 +35,7 @@ tokio = { version = "1.53", features = ["rt", "time"] }
 [dev-dependencies]
 serde_json = "1.0"
 # The protocol's conformance sessions, run against this program.
-cnp-conformance = { git = "https://github.com/cjus/chess-node-protocol", rev = "37af31c47a8c11e88a29a1d2e95d6520e5866432" }
+cnp-conformance = { git = "https://github.com/cjus/chess-node-protocol", rev = "0731fa56faf76ec232e1a88c3661cc4d12f4e7e4" }
 
 [lints.rust]
 missing_docs = "deny"

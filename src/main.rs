@@ -1,12 +1,13 @@
-//! The `solrac-voice` program: a CNP voice node on its standard input and output.
+//! The `audio-chat-box` program: a CNP voice node on its standard input and output.
 //!
 //! ```text
-//! solrac-voice [--models <folder>] [--speak <model|none>] [--hear <model|none>]
-//!              [--listen <model|none>] [--offline]
+//! audio-chat-box [--models <folder>] [--models-url <url>] [--speak <model|none>]
+//!                [--hear <model|none>] [--listen <model|none>] [--offline]
 //! ```
 //!
-//! Solrac starts it with its models folder (`--models`), and with the models its settings
-//! choose. It listens (`voice/listen`) only when asked to with `--listen`: a client that
+//! Its client starts it with its models folder (`--models`), and with the models its
+//! settings choose. Solrac, its first client, also names its own copy of the models
+//! (`--models-url`). It listens (`voice/listen`) only when asked to with `--listen`: a client that
 //! doesn't know the listening model's purpose would fail to read `voice/models`. The program writes nothing but CNP to its standard output, and exits with 0 after
 //! `shutdown` and `exit`, 1 when its input ends without them (spec, 5.3), and 2 when its
 //! command line is wrong.
@@ -15,8 +16,8 @@ use std::io::{self, BufReader};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use solrac_voice::models::{self, LocalModel, MODELS};
-use solrac_voice::node::{self, Config};
+use audio_chat_box::models::{self, LocalModel, MODELS};
+use audio_chat_box::node::{self, Config};
 
 /// What the program is told on its command line.
 #[derive(Debug, PartialEq, Eq)]
@@ -39,16 +40,18 @@ fn usage() -> String {
             .join(", ")
     };
     format!(
-        "usage: solrac-voice [--models <folder>] [--speak <model|none>] [--hear <model|none>] \
-         [--listen <model|none>] [--offline]\n\n\
-         A Chess Node Protocol voice node on standard input and output: Kokoro reads text \
+        "usage: audio-chat-box [--models <folder>] [--models-url <url>] [--speak <model|none>] \
+         [--hear <model|none>] [--listen <model|none>] [--offline]\n\n\
+         A voice node on standard input and output (docs/protocol.md): Kokoro reads text \
          aloud, Parakeet hears speech, Silero VAD finds it as it comes.\n\n  \
          --models <folder>  where the models are, and are downloaded to the first time\n  \
+         --models-url <url> where they are downloaded from (default {})\n  \
          --speak <model>    {} (default {}), or none\n  \
          --hear <model>     {} (default {}), or none\n  \
          --listen <model>   {}, or none (the default); needs --hear\n  \
          --offline          never download: a model that isn't in the folder fails\n  \
          --version          print the version\n",
+        models::MODELS_URL,
         ids(cnp::voice::ModelPurpose::Speak),
         models::KOKORO.id,
         ids(cnp::voice::ModelPurpose::Transcribe),
@@ -65,6 +68,7 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> {
         transcription: Some(models::PARAKEET),
         listening: None,
         offline: false,
+        models_url: None,
     };
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
@@ -77,6 +81,16 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> {
             "--hear" => config.transcription = model_for(&value("--hear")?, "--hear")?,
             "--listen" => config.listening = model_for(&value("--listen")?, "--listen")?,
             "--offline" => config.offline = true,
+            "--models-url" => {
+                let url = value("--models-url")?;
+                // The archives' names go after it.
+                let url = if url.ends_with('/') {
+                    url
+                } else {
+                    format!("{url}/")
+                };
+                config.models_url = Some(url);
+            }
             other => return Err(format!("unknown argument {other}")),
         }
     }
@@ -122,7 +136,7 @@ fn main() -> ExitCode {
                 Ok(true) => ExitCode::SUCCESS,
                 Ok(false) => ExitCode::from(1),
                 Err(error) => {
-                    eprintln!("solrac-voice: reading the input failed: {error}");
+                    eprintln!("audio-chat-box: reading the input failed: {error}");
                     ExitCode::from(1)
                 }
             }
@@ -136,7 +150,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(error) => {
-            eprintln!("solrac-voice: {error}\n\n{}", usage());
+            eprintln!("audio-chat-box: {error}\n\n{}", usage());
             ExitCode::from(2)
         }
     }

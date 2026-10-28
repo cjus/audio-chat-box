@@ -17,7 +17,8 @@
 //! - It ends once the chance has stayed below the threshold for `endSilenceMs`, a pause. The
 //!   detector then hands over the utterance's samples, with a little of the sound from before
 //!   it started (two windows, 64 ms).
-//! - The session adds [`LEAD_IN`] more of the sound from before the start ([`Event::Ended`]'s
+//! - The session adds the listen's `leadInMs` ([`LEAD_IN`] unless it says) more of the sound
+//!   from before the start ([`Event::Ended`]'s
 //!   `lead_in`), which Parakeet hears with the utterance, so a short first word isn't lost
 //!   (below).
 //! - An utterance that reaches `maxSpeechMs` is cut there, pause or not.
@@ -83,10 +84,10 @@ pub const DEFAULT_MIN_SPEECH: Duration = Duration::from_millis(150);
 /// The longest utterance when the listen doesn't say: as long as a recording made with Talk.
 pub const DEFAULT_MAX_SPEECH: Duration = Duration::from_secs(30);
 
-/// How much of the sound from before an utterance's start is heard with it, so that a short
-/// first word the detector's start leaves out is heard (see the [module docs](self)). It is
-/// shorter than any pause that ends an utterance Solrac asks for (800 ms), and the lead-in
-/// stops at the previous utterance's end anyway.
+/// How much of the sound from before an utterance's start is heard with it when the listen
+/// doesn't say (`leadInMs`), so that a short first word the detector's start leaves out is
+/// heard (see the [module docs](self)). It is shorter than any pause that ends an utterance
+/// Solrac asks for (800 ms), and the lead-in stops at the previous utterance's end anyway.
 pub const LEAD_IN: Duration = Duration::from_millis(500);
 
 /// The longest pause or shortest speech a listen may ask for: past this, nobody is talking
@@ -114,6 +115,8 @@ pub struct Settings {
     pub min_speech: Duration,
     /// The longest an utterance may be.
     pub max_speech: Duration,
+    /// How much of the sound from before an utterance's start it is heard with: none at 0.
+    pub lead_in: Duration,
 }
 
 impl Default for Settings {
@@ -122,6 +125,7 @@ impl Default for Settings {
             end_silence: DEFAULT_END_SILENCE,
             min_speech: DEFAULT_MIN_SPEECH,
             max_speech: DEFAULT_MAX_SPEECH,
+            lead_in: LEAD_IN,
         }
     }
 }
@@ -133,6 +137,7 @@ impl Settings {
         end_silence: Option<u64>,
         min_speech: Option<u64>,
         max_speech: Option<u64>,
+        lead_in: Option<u64>,
     ) -> Result<Settings, String> {
         let defaults = Settings::default();
         let pick = |ms: Option<u64>, default: Duration| ms.map_or(default, Duration::from_millis);
@@ -140,6 +145,7 @@ impl Settings {
             end_silence: pick(end_silence, defaults.end_silence),
             min_speech: pick(min_speech, defaults.min_speech),
             max_speech: pick(max_speech, defaults.max_speech),
+            lead_in: pick(lead_in, defaults.lead_in),
         };
         let checks = [
             ("endSilenceMs", settings.end_silence, MAX_SETTING),
@@ -153,6 +159,13 @@ impl Settings {
                     most.as_millis()
                 ));
             }
+        }
+        // No lead-in is allowed: 0 is none.
+        if settings.lead_in > MAX_SETTING {
+            return Err(format!(
+                "leadInMs is from 0 to {} milliseconds",
+                MAX_SETTING.as_millis()
+            ));
         }
         if settings.max_speech <= settings.min_speech {
             return Err("maxSpeechMs must be longer than minSpeechMs".to_string());
@@ -175,7 +188,7 @@ pub enum Event {
         start: usize,
         /// Its samples.
         samples: Vec<f32>,
-        /// Up to [`LEAD_IN`] of the sound just before `start`, to be heard with it: part of
+        /// Up to the listen's lead-in of the sound just before `start`, to be heard with it: part of
         /// the speech, but not part of where it is said to start.
         lead_in: Vec<f32>,
     },
@@ -237,7 +250,10 @@ impl Detector {
             vad,
             speaking: false,
             min_speech: samples_in(settings.min_speech),
-            recent: Recent::new(samples_in(settings.max_speech + BUFFER_MARGIN + LEAD_IN)),
+            recent: Recent::new(samples_in(
+                settings.max_speech + BUFFER_MARGIN + settings.lead_in,
+            )),
+            lead_in: samples_in(settings.lead_in),
             heard_to: 0,
         })
     }
@@ -256,6 +272,8 @@ pub struct Session {
     recent: Recent,
     /// Where the last utterance ended: no lead-in reaches back past it.
     heard_to: usize,
+    /// The listen's lead-in, in samples.
+    lead_in: usize,
     /// Whether it has said that speech started, and not yet that it ended.
     speaking: bool,
     /// The listen's shortest speech, in samples: speech has gone on this long when the
@@ -271,9 +289,7 @@ impl Session {
             let start = usize::try_from(segment.start()).unwrap_or(0);
             let samples = segment.samples().to_vec();
             self.vad.pop();
-            let lead_in = self
-                .recent
-                .before(start, self.heard_to, samples_in(LEAD_IN));
+            let lead_in = self.recent.before(start, self.heard_to, self.lead_in);
             self.heard_to = start + samples.len();
             events.push(Event::Ended {
                 start,
@@ -373,22 +389,25 @@ mod tests {
     #[test]
     fn missing_settings_are_the_defaults_and_wrong_ones_are_refused() {
         assert_eq!(
-            Settings::from_millis(None, None, None),
+            Settings::from_millis(None, None, None, None),
             Ok(Settings::default())
         );
-        let chosen = Settings::from_millis(Some(600), Some(100), Some(20_000)).unwrap();
+        let chosen = Settings::from_millis(Some(600), Some(100), Some(20_000), Some(0)).unwrap();
         assert_eq!(chosen.end_silence, Duration::from_millis(600));
         assert_eq!(chosen.min_speech, Duration::from_millis(100));
         assert_eq!(chosen.max_speech, Duration::from_secs(20));
+        // No lead-in at all.
+        assert_eq!(chosen.lead_in, Duration::ZERO);
         for wrong in [
-            (Some(0), None, None),
-            (Some(10_001), None, None),
-            (None, Some(0), None),
-            (None, None, Some(60_001)),
-            (None, Some(500), Some(400)),
+            (Some(0), None, None, None),
+            (Some(10_001), None, None, None),
+            (None, Some(0), None, None),
+            (None, None, Some(60_001), None),
+            (None, Some(500), Some(400), None),
+            (None, None, None, Some(10_001)),
         ] {
             assert!(
-                Settings::from_millis(wrong.0, wrong.1, wrong.2).is_err(),
+                Settings::from_millis(wrong.0, wrong.1, wrong.2, wrong.3).is_err(),
                 "{wrong:?}"
             );
         }
@@ -436,7 +455,7 @@ mod tests {
 
     #[test]
     fn a_model_that_isnt_there_is_named() {
-        let folder = std::env::temp_dir().join("solrac-voice-no-silero");
+        let folder = std::env::temp_dir().join("audio-chat-box-no-silero");
         let error = Detector::load(&crate::models::SILERO_VAD, &folder)
             .err()
             .unwrap();

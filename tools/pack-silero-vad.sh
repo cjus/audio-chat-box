@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Packs Silero VAD v5 as the archive solrac-voice downloads for listening (cjus/chessgui#134):
+# Packs Silero VAD v5 as the archive audio-chat-box downloads for listening (cjus/chessgui#134):
 # target/silero-vad-v5.tar.bz2, ready to copy to the PNX Studios CDN.
 #
 #   tools/pack-silero-vad.sh
@@ -11,9 +11,9 @@
 # before it is packed.
 #
 # The archive's SHA-256 depends on the files' times, so packing it again gives another; the
-# one on the CDN is the one src/models.rs names. Upload it with
-# `aws s3 cp target/silero-vad-v5.tar.bz2 s3://pnxstudios-solrac/solrac/models/`, and add it
-# to the NOTICE.txt and SHA256SUMS beside it.
+# one in the models-v1 release is the one src/models.rs names. A new one goes into a release
+# (`gh release upload`), with the NOTICE.txt and SHA256SUMS beside it, and to any product's
+# own copy, such as Solrac's on the PNX Studios CDN.
 set -euo pipefail
 
 if [[ $# -gt 0 ]]; then
