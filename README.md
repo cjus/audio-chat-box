@@ -27,10 +27,11 @@ docker compose up --build
 # Open http://localhost:8080
 ```
 
-The first start downloads checked speech models into a persistent volume. This is a speech
+The image carries its models, Kokoro and Parakeet: the build downloads them once (832 MB,
+each checked against its SHA-256), and the container needs no network. This is a speech
 demo, not an LLM chatbot; no account or API key is required. See
-[the Docker demo guide](docs/docker-demo.md) for CPU architecture, model downloads,
-privacy, browser requirements, limits and redistribution considerations.
+[the Docker demo guide](docs/docker-demo.md) for CPU architecture, the models' licences,
+privacy, browser requirements, limits and publishing the image.
 
 ## Running it
 

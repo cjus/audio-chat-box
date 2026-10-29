@@ -14,11 +14,7 @@ services:
       - "127.0.0.1:8080:8080"
     environment:
       DEMO_ORIGIN: http://localhost:8080
-      # First run needs network for checksum-verified model downloads.
-      # Set to 1 only after the models volume has been populated.
-      AUDIO_CHAT_BOX_OFFLINE: "${AUDIO_CHAT_BOX_OFFLINE:-0}"
-    volumes:
-      - models:/models
+    # The models are in the image (docs/docker-demo.md), so nothing in it is written but /tmp.
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
@@ -31,5 +27,3 @@ services:
     mem_limit: 6g
     pids_limit: 128
     stop_grace_period: 10s
-volumes:
-  models:

@@ -1,0 +1,48 @@
+The models in this image
+========================
+
+The audio-chat-box demo image carries two speech models in /models, so it runs with no
+download. Both come from the archives in https://github.com/cjus/audio-chat-box's "models-v1"
+release, which are sherpa-onnx's, unchanged, and were checked against the size and SHA-256
+that audio-chat-box's src/models.rs gives each before they were unpacked
+(tools/fetch-models.sh). This file is also at /usr/share/audio-chat-box/MODELS-NOTICE.txt.
+
+Only the files audio-chat-box reads are kept, with Kokoro's licence; the rest of each archive
+(Chinese and British English lexicons and rules, CppJieba's dictionaries, a test recording,
+sherpa-onnx's readme) is left out. Nothing kept is changed, but for the one file added below.
+
+
+/models/kokoro-multi-lang-v1_0
+------------------------------
+
+Kokoro-82M v1.0, its model weights and its 54 voices, by hexgrad.
+https://huggingface.co/hexgrad/Kokoro-82M
+Converted to ONNX, with the voice table, token list and American English lexicon, and
+packaged, by the k2-fsa sherpa-onnx project. https://github.com/k2-fsa/sherpa-onnx
+Licence: Apache-2.0, whose text is the LICENSE file in that folder.
+Files: model.onnx, voices.bin, tokens.txt, lexicon-us-en.txt, LICENSE.
+
+espeak-ng-data/ in that folder is eSpeak NG's pronunciation data, compiled from eSpeak NG's
+sources, as sherpa-onnx packaged it (the espeak-ng-data.tar.bz2 of its "tts-models"
+release). Licence: GPL-3.0-or-later, whose text is /usr/share/audio-chat-box/LICENSE-GPL-3.0.
+Source: https://github.com/espeak-ng/espeak-ng (audio-chat-box links sherpa-onnx's fork of
+it, https://github.com/csukuangfj/espeak-ng; see
+/usr/share/audio-chat-box/native-licences/README.md). Neither archive records which commit
+compiled this data.
+
+
+/models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8
+--------------------------------------------------
+
+Parakeet TDT 0.6B v2 (parakeet-tdt-0.6b-v2), by NVIDIA.
+https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2
+Licensed under the Creative Commons Attribution 4.0 International licence (CC BY 4.0):
+https://creativecommons.org/licenses/by/4.0/
+It is provided as-is, without warranties of any kind, as Section 5 of that licence says
+("Disclaimer of Warranties and Limitation of Liability").
+
+Changes: converted to ONNX and its weights quantised to 8-bit integers (encoder.int8.onnx,
+decoder.int8.onnx, joiner.int8.onnx, with tokens.txt), and packaged, by the k2-fsa sherpa-onnx
+project (https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models). audio-chat-box adds
+bpe.vocab, the list of the model's word pieces made from tokens.txt, which it uses to match
+hotwords. NVIDIA does not endorse this image or audio-chat-box.

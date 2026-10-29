@@ -19,6 +19,10 @@ gives the same licences as below.
 | `sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2` | Parakeet TDT 0.6B v2: its weights converted to ONNX and quantised to 8-bit integers by sherpa-onnx, which also packaged it. `audio-chat-box` writes a `bpe.vocab` beside it, made from its `tokens.txt` | [nvidia/parakeet-tdt-0.6b-v2](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) by NVIDIA, packaged by [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models) | [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/) |
 | `silero-vad-v5.tar.bz2` | Silero VAD v5, which finds speech for listening (cjus/chessgui#134): `silero_vad.onnx` unchanged, with its licence. Silero publishes a bare file, so `tools/pack-silero-vad.sh` packs it, the one archive here not sherpa-onnx's | [snakers4/silero-vad](https://github.com/snakers4/silero-vad) at tag v5.0, by the Silero Team | MIT |
 
+The Docker demo image (`docs/docker-demo.md`) carries Kokoro and Parakeet in it, fetched
+the same way at build time by `tools/fetch-models.sh`, with only the files the program reads
+and `demo-web/MODELS-NOTICE.txt` as `/models/NOTICE.txt`.
+
 ## Linked into the program
 
 | What | Source | Licence |

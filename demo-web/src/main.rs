@@ -82,8 +82,11 @@ fn start(state: Arc<Mutex<State>>) -> io::Result<Speech> {
                 s.ready = s.speak && s.hear;
                 s.detail = if s.ready {
                     "Models ready".into()
+                } else if stage == "downloading" {
+                    // Only outside the Docker image, which carries its models.
+                    "Models: downloading; the first start downloads approximately 832 MB".into()
                 } else {
-                    format!("Models: {stage}; first start may download approximately 832 MB")
+                    format!("Models: {stage}")
                 };
             } else if value.get("id").is_some() && value["id"] != 0 && tx.try_send(value).is_err() {
                 break;
