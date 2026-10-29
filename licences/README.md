@@ -33,8 +33,9 @@ neither is among them.
 **Their source** is the `sources-v1` release of this repository, which
 [`tools/sources.sh`](../tools/sources.sh) gathers from
 [`tools/sources/sources.txt`](../tools/sources/sources.txt): every archive the builds of the
-Linux x86-64 library fetched, each checked by upstream's hash, with how each library was
-built ([`tools/sources/README.md`](../tools/sources/README.md)). Every copy of the program
+Linux x86-64 and macOS (arm64, x86-64) libraries fetched, each checked by upstream's hash,
+with how each library was built ([`tools/sources/README.md`](../tools/sources/README.md)) and
+the logs of those builds ([`tools/sources/build-logs/`](../tools/sources/build-logs/README.md)). Every copy of the program
 must be able to lead to it, as the program is GPL-3.0-or-later.
 
 **When the sherpa-onnx pin moves**, look again at its `cmake/*.cmake` at the new tag (and
