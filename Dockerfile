@@ -1,4 +1,5 @@
-# Local demonstration image, not a published distribution. See docs/docker-demo.md.
+# Local demonstration image. Publishing it distributes a GPL-3.0-or-later program: read
+# "Publishing the image" in docs/docker-demo.md first.
 # Only the Linux x86-64 native archive below has been checksum-verified.
 FROM rust:1.97.1-bookworm AS build
 ARG TARGETARCH
@@ -27,6 +28,13 @@ RUN tar --exclude='./target' --exclude='./demo-web/target' \
     -czf /project-source.tar.gz .
 
 FROM debian:bookworm-slim AS runtime
+# The commit the image was built from, so a pulled image leads back to its exact source.
+ARG REVISION=unknown
+LABEL org.opencontainers.image.title="audio-chat-box Parrot Service demo" \
+      org.opencontainers.image.description="Local browser demo: record, transcribe with Parakeet, read back with Kokoro" \
+      org.opencontainers.image.source="https://github.com/cjus/audio-chat-box" \
+      org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.licenses="GPL-3.0-or-later"
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libstdc++6 libgomp1 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 demo && useradd --uid 10001 --gid demo --no-create-home demo \

@@ -1,7 +1,14 @@
 services:
   demo:
+    # `docker compose build` tags the image with this name; `docker compose push` publishes it.
+    # Read "Publishing the image" in docs/docker-demo.md before pushing anywhere public.
+    image: "${DEMO_IMAGE:-pnxstudios/audio-chat-box-demo}:${DEMO_TAG:-local}"
     build:
       context: .
+      args:
+        REVISION: "${REVISION:-unknown}"
+    # Build what this checkout holds when the image is missing; never fetch it from a registry.
+    pull_policy: never
     platform: linux/amd64
     ports:
       - "127.0.0.1:8080:8080"

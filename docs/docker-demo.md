@@ -88,8 +88,9 @@ docker compose down -v    # removes the models volume; next run downloads again
   Build-time native archive integrity is checked with the same checksum as repository CI.
   The compiler version is pinned; the base-image tags and apt package versions are not
   digest/version-pinned, so this is not a bit-for-bit reproducible supply-chain release.
-- No images are pushed or services deployed by these files. `docker compose build` builds
-  locally; it does not publish anything.
+- `docker compose build` and `docker compose up` build locally and never pull the image from
+  a registry. Nothing is pushed unless you run `docker compose push` or `docker buildx
+  build --push` (see "Publishing the image").
 
 ## Licences and redistribution
 
@@ -105,8 +106,47 @@ Apache-2.0; Parakeet CC-BY-4.0, attributed to NVIDIA. Their downloads carry mode
 project-source archive is not the full corresponding source of all statically linked native
 libraries. Before redistribution, arrange appropriate corresponding source and build
 information for the exact binary and its GPL components, verify all required notices and
-model attribution, and preserve those alongside any distributed image. This PR does not
-publish an image or assert that a repository link alone meets those requirements.
+model attribution, and preserve those alongside any distributed image. A link to this
+repository alone does not meet those requirements.
+
+## Publishing the image
+
+Compose names the image `pnxstudios/audio-chat-box-demo:local`; `DEMO_IMAGE` and `DEMO_TAG`
+change the name and tag. The image's OCI labels name this repository, its licence and, from
+`REVISION`, the commit it was built from.
+
+**Decide who may pull it first.** A private repository that only you pull from gives the
+program to no one else. A public one gives a GPL-3.0-or-later program to everyone who pulls
+it, so each must be able to get the Corresponding Source of that exact binary: this
+repository at the image's revision, and the source of every library in sherpa-onnx's
+prebuilt static library at the versions in [`licences/README.md`](../licences/README.md),
+eSpeak NG among them, with how that library is built. Arrange that, for example as a
+release of source archives in this repository that the image points to, before the image is
+public.
+
+Build from a commit on `main` that anyone can find, then push:
+
+```sh
+docker login -u <docker-hub-user>    # an access token as the password
+git checkout main && git pull
+REVISION=$(git rev-parse HEAD) DEMO_TAG=0.1.0 docker compose build
+REVISION=$(git rev-parse HEAD) DEMO_TAG=0.1.0 docker compose push
+```
+
+To run a pulled image with the same protections as `compose.yaml`:
+
+```sh
+docker run --rm --platform linux/amd64 -p 127.0.0.1:8080:8080 \
+  -v audio-chat-box-models:/models --read-only --tmpfs /tmp:size=64m,mode=1777 \
+  --init --cap-drop ALL --security-opt no-new-privileges:true \
+  --cpus 4 --memory 6g --pids-limit 128 \
+  pnxstudios/audio-chat-box-demo:0.1.0
+```
+
+The server accepts only requests whose `Host` and `Origin` match `DEMO_ORIGIN`
+(`http://localhost:8080`), so open the page at that address, not `127.0.0.1`. Publishing on
+another host port needs a matching origin, for example
+`-p 127.0.0.1:9000:8080 -e DEMO_ORIGIN=http://localhost:9000`.
 
 ## Verification
 
