@@ -18,8 +18,9 @@ A maintainer's own instructions, if any, are in `CLAUDE.local.md`, which is not 
 3. **Our code is `MIT OR Apache-2.0`**; every crate it depends on is permissive (`deny.toml`).
    The program as a whole is GPL-3.0-or-later (README, "Licence"). Every copy of it goes with
    `THIRD-PARTY-NOTICES.txt` (`tools/notices.sh`): the crates' licences, and those of the C and
-   C++ libraries in sherpa-onnx's prebuilt library, kept in `licences/`. Bumping the
-   sherpa-onnx pin means looking at those libraries again (`licences/README.md`).
+   C++ libraries in sherpa-onnx's prebuilt library, kept in `licences/`, and can lead to their
+   source, the `sources-v<n>` release (`tools/sources.sh`). Bumping the sherpa-onnx pin means
+   looking at those libraries again and a new sources release (`licences/README.md`).
 4. **Nothing but protocol messages on standard output** (spec, 3.1). Logs go to standard error.
 5. **The protocol is pinned** to a commit (`rev`) of `cjus/chess-node-protocol` in `Cargo.toml`,
    for both `cnp` and `cnp-conformance`. `tests/conformance.rs` runs every session that applies

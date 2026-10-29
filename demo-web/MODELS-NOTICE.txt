@@ -25,10 +25,10 @@ Files: model.onnx, voices.bin, tokens.txt, lexicon-us-en.txt, LICENSE.
 espeak-ng-data/ in that folder is eSpeak NG's pronunciation data, compiled from eSpeak NG's
 sources, as sherpa-onnx packaged it (the espeak-ng-data.tar.bz2 of its "tts-models"
 release). Licence: GPL-3.0-or-later, whose text is /usr/share/audio-chat-box/LICENSE-GPL-3.0.
-Source: https://github.com/espeak-ng/espeak-ng (audio-chat-box links sherpa-onnx's fork of
-it, https://github.com/csukuangfj/espeak-ng; see
-/usr/share/audio-chat-box/native-licences/README.md). Neither archive records which commit
-compiled this data.
+Its source is sherpa-onnx's fork of eSpeak NG, https://github.com/csukuangfj/espeak-ng, at
+commit 8593723, built with CMake: espeak-ng-8593723f10cf.zip in
+https://github.com/cjus/audio-chat-box/releases/tag/sources-v1, whose README
+(/usr/share/audio-chat-box/SOURCES.md) says how that was found.
 
 
 /models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8

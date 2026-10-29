@@ -56,6 +56,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 COPY --from=models /models /models
 COPY demo-web/MODELS-NOTICE.txt /models/NOTICE.txt
 COPY demo-web/MODELS-NOTICE.txt /usr/share/audio-chat-box/MODELS-NOTICE.txt
+# Where the source of the GPL program's native libraries is: the sources-v1 release.
+COPY tools/sources/README.md /usr/share/audio-chat-box/SOURCES.md
 COPY --from=build /source/target/release/audio-chat-box /usr/local/bin/audio-chat-box
 COPY --from=build /source/demo-web/target/release/audio-chat-box-demo /usr/local/bin/audio-chat-box-demo
 COPY --from=build /source/target/licences/ /usr/share/audio-chat-box/

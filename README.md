@@ -111,8 +111,11 @@ above, without any additional terms or conditions.
 The `audio-chat-box` program as built links sherpa-onnx's prebuilt library, which includes
 [eSpeak NG](https://github.com/espeak-ng/espeak-ng) (GPL-3.0-or-later): Kokoro uses it to sound
 out words its lexicon doesn't have. So the program as a whole is
-[GPL-3.0-or-later](LICENSE-GPL-3.0), and its source is this repository. The models have licences
-of their own: Kokoro Apache-2.0, Parakeet CC-BY-4.0 (by NVIDIA), Silero VAD MIT.
+[GPL-3.0-or-later](LICENSE-GPL-3.0), and its source is this repository with the source of the
+libraries in sherpa-onnx's prebuilt library: this repository's
+[`sources-v1` release](https://github.com/cjus/audio-chat-box/releases/tag/sources-v1), which
+[`tools/sources.sh`](tools/sources.sh) gathers. The models have licences of their own: Kokoro
+Apache-2.0, Parakeet CC-BY-4.0 (by NVIDIA), Silero VAD MIT.
 
 Every copy of the program goes with the notices of what it is built with:
 `tools/notices.sh` writes them to `target/licences/THIRD-PARTY-NOTICES.txt`. They are the
