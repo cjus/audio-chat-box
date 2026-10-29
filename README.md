@@ -18,20 +18,26 @@ product's domain: your program tells it which words to expect (hotwords), and it
 them where the sound allows, "knight" over "night" for a chess board, your product's names
 for yours.
 
-## Parrot Service in Docker
+## Try it with Docker
 
-Try microphone recording, transcription and spoken read-back on a single local page:
+The fastest way to try audio-chat-box, with nothing to build: pull the **Parrot Service**
+demo from Docker Hub and run it. You speak, it shows what it heard, and it reads it back.
 
 ```sh
-docker compose up --build
-# Open http://localhost:8080
+docker pull pnxstudios/audio-chat-box-demo
+docker run --rm --platform linux/amd64 -p 127.0.0.1:8080:8080 pnxstudios/audio-chat-box-demo
 ```
 
-The image carries its models, Kokoro and Parakeet: the build downloads them once (832 MB,
-each checked against its SHA-256), and the container needs no network. This is a speech
-demo, not an LLM chatbot; no account or API key is required. See
-[the Docker demo guide](docs/docker-demo.md) for CPU architecture, the models' licences,
-privacy, browser requirements, limits and publishing the image.
+Then open **http://localhost:8080** (that address, not `127.0.0.1`), press Record and allow
+the microphone. You can also type text and hear it in any of Kokoro's 54 voices. Ctrl+C
+stops it.
+
+The image (about 880 MB to download) carries the program and its models, Kokoro and
+Parakeet, so it runs with no network, account or API key. It is built for Linux amd64; on
+Apple Silicon, Docker runs it under emulation, which works but is slower. This is a speech
+demo, not an LLM chatbot. [The Docker demo guide](docs/docker-demo.md) covers building the
+image yourself, running it with fewer privileges, the models' licences, privacy, browser
+requirements and limits.
 
 ## Running it
 

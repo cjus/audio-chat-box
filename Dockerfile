@@ -47,7 +47,7 @@ RUN bash /source/tools/fetch-models.sh /models kokoro parakeet \
     && chmod -R a+rX,go-w /models
 
 FROM debian:bookworm-slim AS runtime
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libstdc++6 libgomp1 \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libstdc++6 libgomp1 tini \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 demo && useradd --uid 10001 --gid demo --no-create-home demo \
     && mkdir -p /usr/share/audio-chat-box
@@ -77,4 +77,6 @@ LABEL org.opencontainers.image.title="audio-chat-box Parrot Service demo" \
       org.opencontainers.image.licenses="GPL-3.0-or-later AND Apache-2.0 AND CC-BY-4.0"
 USER 10001:10001
 EXPOSE 8080
-ENTRYPOINT ["/usr/local/bin/audio-chat-box-demo"]
+# tini (MIT) runs as process 1, so a plain `docker run` stops on Ctrl+C or `docker stop`:
+# the kernel gives process 1 no default action for SIGINT or SIGTERM, and the server sets none.
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/audio-chat-box-demo"]

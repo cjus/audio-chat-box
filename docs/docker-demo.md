@@ -15,47 +15,70 @@ recognition and synthesis, not a conversational language model. No API key, paid
 browser speech-recognition service, or hosted LLM is used. An eventual conversational demo
 would need a separately designed and explicitly disclosed language-model integration.
 
-## Try it locally
+## Run it from Docker Hub
 
-Requires Docker Engine/Desktop with Compose v2 and about 3 GB of disk for the build and the
-image. This first version targets **Linux amd64 only**. Apple Silicon uses Docker's amd64
-emulation and may be substantially slower; native arm64 is not claimed supported by this
-image.
+Needs only Docker. The image is `pnxstudios/audio-chat-box-demo` on Docker Hub: about 880 MB
+to download, 1.2 GB once pulled.
 
 ```sh
-docker compose up --build
+docker pull pnxstudios/audio-chat-box-demo
+docker run --rm --platform linux/amd64 -p 127.0.0.1:8080:8080 pnxstudios/audio-chat-box-demo
 ```
 
-**The image carries its models**, so it needs no network and no volume to run. Building it
-downloads Kokoro and Parakeet once (about **832 MB**) from this repository's `models-v1`
-release, each checked against the size and SHA-256 in `src/models.rs` before it is unpacked
-(`tools/fetch-models.sh`), and keeps only the files `audio-chat-box` reads: about 1 GB in the
-image, which is about 1.2 GB in all. Docker's build cache keeps them, so later builds
-download nothing unless `src/models.rs` or the script changes. The demo doesn't need Silero
-VAD, because recording is started and stopped by hand. The image sets
-`AUDIO_CHAT_BOX_OFFLINE=1`, so the program never tries to download a model.
-
-Visit **http://localhost:8080** on the same machine once the page's model status says ready
+Open **http://localhost:8080** on the same machine once the page's model status says ready
 (a few seconds). Allow microphone permission when you press Record. A browser audio playback
 control remains available if autoplay is blocked. Stop recording before speaking again. The
-page's Cancel control stops the recording/request.
+page's Cancel control stops the recording/request. Ctrl+C stops the container.
 
-The application does not upload recordings. Browser microphone data goes to this local
-demo's server for inference, then is discarded rather than written to disk; the container's
-filesystem is read-only but for a small `/tmp`. Treat the host/container as trusted:
-in-memory audio and text are still accessible to software with host privileges.
+**The image carries its models**, Kokoro and Parakeet, so it needs no network, volume or
+account to run, and never tries to download a model (`AUDIO_CHAT_BOX_OFFLINE=1`). It is
+built for **Linux amd64 only**: on Apple Silicon, `--platform linux/amd64` runs it under
+Docker's emulation, slower (on the Mac it was tested on, about 4 s to speak a phrase, against
+under 1 s for the program built natively); native arm64 is not claimed supported.
+
+To run it with fewer privileges and capped resources (the server needs none of what these
+take away):
 
 ```sh
-docker compose down       # stops the demo
+docker run --rm --platform linux/amd64 -p 127.0.0.1:8080:8080 \
+  --read-only --tmpfs /tmp:size=64m,mode=1777 \
+  --cap-drop ALL --security-opt no-new-privileges:true \
+  --cpus 4 --memory 6g --pids-limit 128 \
+  pnxstudios/audio-chat-box-demo
 ```
+
+The server accepts only requests whose `Host` and `Origin` match `DEMO_ORIGIN`
+(`http://localhost:8080`), so open the page at that address, not `127.0.0.1`. Another host
+port needs a matching origin, for example
+`-p 127.0.0.1:9000:8080 -e DEMO_ORIGIN=http://localhost:9000`.
+
+The application does not upload recordings. Browser microphone data goes to this local
+demo's server for inference, then is discarded rather than written to disk. Treat the
+host/container as trusted: in-memory audio and text are still accessible to software with
+host privileges.
+
+## Build it yourself
+
+From a clone of this repository, with about 10 GB of free disk for Docker's build cache:
+
+```sh
+docker build --platform linux/amd64 -t pnxstudios/audio-chat-box-demo .
+```
+
+then run it as above. The build downloads Kokoro and Parakeet once (about **832 MB**) from
+this repository's `models-v1` release, each checked against the size and SHA-256 in
+`src/models.rs` before it is unpacked (`tools/fetch-models.sh`), and keeps only the files
+`audio-chat-box` reads. Docker's build cache keeps them, so later builds download nothing
+unless `src/models.rs` or the script changes. The demo doesn't need Silero VAD, because
+recording is started and stopped by hand.
 
 ## Limits and deployment challenges
 
 - **Microphones require a secure context.** Browsers generally allow `http://localhost`.
   An ordinary `http://192.168...` page on a LAN does not qualify. Remote access needs HTTPS,
   an explicitly configured `DEMO_ORIGIN`, and a separate authentication/access-control
-  design. Do not just publish the port on all interfaces. The supplied Compose file binds
-  only `127.0.0.1`; it is a single-user local demo, not an internet service.
+  design. Do not just publish the port on all interfaces: the commands above bind only
+  `127.0.0.1`; it is a single-user local demo, not an internet service.
 - Browser recording is converted to mono 16 kHz PCM WAV before transcription. Sending a
   browser's arbitrary WebM/Opus recording straight to the engine would not work: the engine
   accepts WAV or raw PCM, not WebM. Browser permission denial, missing input devices,
@@ -72,7 +95,7 @@ docker compose down       # stops the demo
 - Input is bounded to short recordings and text. The page/server enforce limits; this is
   not an upload endpoint for arbitrary large files. Do not use confidential audio on an
   untrusted Docker host or forward this unauthenticated local service to other users.
-- The example allocates up to **4 CPUs and 6 GiB RAM**, with a PID limit. These are protective
+- The capped command allows up to **4 CPUs and 6 GiB RAM**, with a PID limit. These are protective
   demo defaults, **not measured minimums or performance guarantees**. Startup/loading and
   inference may fail under insufficient Docker Desktop memory. CPU latency and emulated
   amd64 performance need measurement on the target machine; no GPU setup is included.
@@ -82,9 +105,6 @@ docker compose down       # stops the demo
   Build-time native archive integrity is checked with the same checksum as repository CI.
   The compiler version is pinned; the base-image tags and apt package versions are not
   digest/version-pinned, so this is not a bit-for-bit reproducible supply-chain release.
-- `docker compose build` and `docker compose up` build locally and never pull the image from
-  a registry. Nothing is pushed unless you run `docker compose push` or `docker buildx
-  build --push` (see "Publishing the image").
 
 ## Licences and redistribution
 
@@ -115,14 +135,13 @@ question: sherpa-onnx's Kokoro archive copies `espeak-ng-data/` from the
 `espeak-ng-data.tar.bz2` in its `tts-models` release (its `export-kokoro.yaml` workflow), and
 neither records which eSpeak NG commit compiled it. Finding that out (from sherpa-onnx, or by
 compiling candidate sources and comparing) is part of preparing the source. A link to this
-repository alone does not meet this. A private image that only you pull gives the program to no one else, so it owes
-nothing until it is shared.
+repository alone does not meet this. A private image that only you pull gives the program
+to no one else, so it owes nothing until it is shared.
 
 ## Publishing the image
 
-Compose names the image `pnxstudios/audio-chat-box-demo:local`; `DEMO_IMAGE` and `DEMO_TAG`
-change the name and tag. The image's OCI labels name this repository, its licence and, from
-`REVISION`, the commit it was built from.
+The image's OCI labels name this repository, its licences and, from the `REVISION` build
+argument, the commit it was built from.
 
 **Decide who may pull it first.** A private repository that only you pull from gives the
 program to no one else. A public one gives a GPL-3.0-or-later program, and eSpeak NG's data,
@@ -131,30 +150,17 @@ and redistribution"). Arrange that, for example as a release of source archives 
 repository that the image points to, before the image is public. The models' notices are
 already in the image.
 
-Build from a commit on `main` that anyone can find, then push:
+Build from a commit on `main` that anyone can find, tag it with its version and `latest`
+(what `docker pull pnxstudios/audio-chat-box-demo` fetches), then push both:
 
 ```sh
-docker login -u <docker-hub-user>    # an access token as the password
+docker login -u pnxstudios           # an access token as the password
 git checkout main && git pull
-REVISION=$(git rev-parse HEAD) DEMO_TAG=0.1.0 docker compose build
-REVISION=$(git rev-parse HEAD) DEMO_TAG=0.1.0 docker compose push
+docker build --platform linux/amd64 --build-arg REVISION=$(git rev-parse HEAD) \
+  -t pnxstudios/audio-chat-box-demo:0.1.0 -t pnxstudios/audio-chat-box-demo:latest .
+docker push pnxstudios/audio-chat-box-demo:0.1.0
+docker push pnxstudios/audio-chat-box-demo:latest
 ```
-
-To run a pulled image with the same protections as `compose.yaml` (it needs nothing else:
-the models are in it):
-
-```sh
-docker run --rm --platform linux/amd64 -p 127.0.0.1:8080:8080 \
-  --read-only --tmpfs /tmp:size=64m,mode=1777 \
-  --init --cap-drop ALL --security-opt no-new-privileges:true \
-  --cpus 4 --memory 6g --pids-limit 128 \
-  pnxstudios/audio-chat-box-demo:0.1.0
-```
-
-The server accepts only requests whose `Host` and `Origin` match `DEMO_ORIGIN`
-(`http://localhost:8080`), so open the page at that address, not `127.0.0.1`. Publishing on
-another host port needs a matching origin, for example
-`-p 127.0.0.1:9000:8080 -e DEMO_ORIGIN=http://localhost:9000`.
 
 ## Verification
 
