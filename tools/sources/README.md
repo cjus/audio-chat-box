@@ -11,12 +11,16 @@ links, as the builds that made the library fetched them. Each archive keeps its 
 archive named below can be downloaded from it, with `SHA256SUMS`.
 
 It covers every copy of `audio-chat-box` built with sherpa-onnx **1.13.8** (`Cargo.toml`) for
-**Linux x86-64**, whose library is `sherpa-onnx-v1.13.8-linux-x64-static-lib.tar.bz2`
-(SHA-256 `e1fdc5b67530e15741ef897fa5ffff297056f3bf0c6d829a27af9225a4c4b5a6`). That includes the
-Docker image `pnxstudios/audio-chat-box-demo` `0.1.0`, built from commit `4190c28`
-(its `org.opencontainers.image.revision` label). The macOS libraries are built from the same
-sherpa-onnx sources, but with an ONNX Runtime from other builds, which this release doesn't
-yet record.
+**Linux x86-64** and **macOS** (Apple silicon and Intel), whose libraries are:
+
+| Platform | sherpa-onnx's static library | SHA-256 |
+| --- | --- | --- |
+| Linux x86-64 | `sherpa-onnx-v1.13.8-linux-x64-static-lib.tar.bz2` | `e1fdc5b67530e15741ef897fa5ffff297056f3bf0c6d829a27af9225a4c4b5a6` |
+| macOS arm64 | `sherpa-onnx-v1.13.8-osx-arm64-static-lib.tar.bz2` | `9091bf160dc7fdacedbc906b212badf53c2993f4e5277a0e03998e96c31d60da` |
+| macOS x86-64 | `sherpa-onnx-v1.13.8-osx-x64-static-lib.tar.bz2` | `a3f88da3e54c850a12d61431e73f8affcd1f13738b75b768847dd79541835b4b` |
+
+That includes the Docker image `pnxstudios/audio-chat-box-demo` from `0.1.0` (commit `4190c28`)
+on: its `org.opencontainers.image.revision` label names the commit of each.
 
 ## What is in it
 
@@ -31,18 +35,26 @@ yet record.
 | `libpiper_phonemize.a` | `piper-phonemize-f3ff95afc036.zip` (with uni-algo in it) |
 | `libespeak-ng.a`, `libucd.a` | `espeak-ng-ed530aa11304.zip` |
 | `libssentencepiece_core.a` | `simple-sentencepiece-0.7.tar.gz` |
-| `libonnxruntime.a` | `onnxruntime-1.28.2.tar.gz` and its three `onnxruntime-1.28.2-submodule-*` archives, the twelve `onnxruntime-dep-*` archives its build fetched, and `onnxruntime-build-6314c7b.tar.gz`, which built it |
+| `libonnxruntime.a` | `onnxruntime-1.28.2.tar.gz` and its three `onnxruntime-1.28.2-submodule-*` archives, the `onnxruntime-dep-*` archives its build fetched (all twelve on Linux; on macOS all but cpuinfo), and `onnxruntime-build-6314c7b.tar.gz`, which built it |
 
-The static library also holds `libsherpa-onnx-portaudio_static.a` and
-`libsherpa-onnx-cxx-api.a`, which `audio-chat-box` doesn't link (`sherpa-onnx-sys` names the
-libraries it links, and neither is among them), so PortAudio's source isn't here.
-`sherpa-onnx-1.13.8.tar.gz` has the C++ API's anyway.
+The Linux and macOS libraries hold the same fifteen static libraries. They also hold
+`libsherpa-onnx-portaudio_static.a` and `libsherpa-onnx-cxx-api.a`, which `audio-chat-box`
+doesn't link (`sherpa-onnx-sys` names the libraries it links, and neither is among them), so
+PortAudio's source isn't here. `sherpa-onnx-1.13.8.tar.gz` has the C++ API's anyway.
 
 ## How each was built
 
-- **sherpa-onnx's static library**: its `.github/workflows/linux.yaml` at `v1.13.8`, in the
+- **sherpa-onnx's static library for Linux**: its `.github/workflows/linux.yaml` at
+  `v1.13.8` (GitHub Actions run 34486043450, job "Release shared-OFF tts-ON"), in the
   `quay.io/pypa/manylinux2014_x86_64` image, with shared libraries off. Its CMake files
   (`cmake/*.cmake`) fetch the archives above, each checked by the SHA-256 they give it.
+- **sherpa-onnx's static libraries for macOS**: its `.github/workflows/macos.yaml` at
+  `v1.13.8` (run 34486043393, job "Release static tts-ON macos-latest arm64;x86_64"), which
+  builds one universal library for both architectures from the same CMake files and archives,
+  then cuts the arm64 and x86-64 libraries out of it with `lipo -thin`. Being universal, it
+  links the universal2 ONNX Runtime (`cmake/onnxruntime-osx-universal-static.cmake`): the
+  arm64 slice of `onnxruntime-osx-universal2-static_lib-1.28.2.zip`'s `libonnxruntime.a` is
+  byte for byte the `libonnxruntime.a` of the arm64 library.
   kaldi-decoder's own `cmake/` would fetch Eigen 3.4.0 and kaldifst's OpenFst 2026-04-10, but
   sherpa-onnx's `cmake/` comes first in CMake's module path, so its `eigen.cmake` (5.0.1) and
   `openfst.cmake` (2026-07-09) are the ones used.
@@ -54,7 +66,14 @@ libraries it links, and neither is among them), so PortAudio's source isn't here
   its submodules, after applying that repository's patch to ONNX Runtime's CMake files. The
   build fetched the twelve `onnxruntime-dep-*` archives ("-- Fetch ... from" in the run's log);
   protoc 21.12 ran as a build tool. The rest of ONNX Runtime's `cmake/deps.txt` (GPU, mobile,
-  web and test dependencies) wasn't fetched.
+  web and test dependencies) wasn't fetched. For macOS,
+  `onnxruntime-osx-universal2-static_lib-1.28.2.zip` was built by the same commit
+  (`.github/workflows/macos-universal2.yaml`, run 33741118112) from the same ONNX Runtime
+  commit and submodules, and fetched the same archives but cpuinfo.
+
+The logs of all these runs are in the audio-chat-box repository, in
+[`tools/sources/build-logs/`](https://github.com/cjus/audio-chat-box/tree/main/tools/sources/build-logs),
+as GitHub keeps a run's log for only 90 days.
 
 ## eSpeak NG's pronunciation data
 

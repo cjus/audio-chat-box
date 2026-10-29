@@ -35,20 +35,22 @@ kissfft-febd4caeed32.zip  sha256:497103e664168ebe39580b757adbe616f6cf85a16572af5
 # above is 9 commits on, none of them to the data's sources (dictsource/, phsource/).
 espeak-ng-8593723f10cf.zip  sha256:cc8092f23a28ccd79b1c5e62984a4c4ac1959d2d0b8193ac208d728c620bd5ed  https://github.com/csukuangfj/espeak-ng/archive/8593723f10cfd9befd50de447f14bf0a9d2a14a4.zip
 
-# ONNX Runtime, which sherpa-onnx links prebuilt (cmake/onnxruntime-linux-x86_64-static.cmake):
-# onnxruntime-linux-x64-static_lib-1.28.2-glibc2_17.zip from csukuangfj/onnxruntime-libs,
-# built by csukuangfj/onnxruntime-build at 6314c7b (GitHub Actions run 33741118168, linux-217.yaml,
-# which also patches ONNX Runtime's CMake files) from Microsoft's tag v1.28.2 (33ca962) with
-# its submodules (pinned here).
+# ONNX Runtime, which sherpa-onnx links prebuilt from csukuangfj/onnxruntime-libs: on Linux
+# onnxruntime-linux-x64-static_lib-1.28.2-glibc2_17.zip (cmake/onnxruntime-linux-x86_64-static.cmake),
+# on macOS onnxruntime-osx-universal2-static_lib-1.28.2.zip (cmake/onnxruntime-osx-universal-static.cmake),
+# both built by csukuangfj/onnxruntime-build at 6314c7b (GitHub Actions runs 33741118168,
+# linux-217.yaml, and 33741118112, macos-universal2.yaml, which also patch ONNX Runtime's CMake
+# files) from Microsoft's tag v1.28.2 (33ca962) with its submodules (pinned here).
+# tools/sources/build-logs has their logs.
 onnxruntime-build-6314c7b.tar.gz  sha256:eb4197b30e7b8350f34e69c1deb4e807159d7b377e640146d545e95e7d48d7a5  https://github.com/csukuangfj/onnxruntime-build/archive/6314c7b252578dc0b8ddd3919b593c4359812818.tar.gz
 onnxruntime-1.28.2.tar.gz  sha256:889281e9b54b65664b1628fa28bab05b1238f388ad30c179dbe5bc15655a7532  https://github.com/microsoft/onnxruntime/archive/33ca9628233dc8f002435e868d4c2e9f82766ca1.tar.gz
 onnxruntime-1.28.2-submodule-onnx-2bb5046.tar.gz  sha256:fc8cd173cd3a942eb30cb04a95b10d91d9d7d86f6d34222cb931021129075d03  https://github.com/onnx/onnx/archive/2bb50465112feca9003e1ed654d77f01ff1415ca.tar.gz
 onnxruntime-1.28.2-submodule-emsdk-c0bb220.tar.gz  sha256:96765e55337d957e9182215ca72f666d8c7fabdc0d1d9fa98234343882084101  https://github.com/emscripten-core/emsdk/archive/c0bb220cb6e6f4e0fabb6f6db9efd53390ef5e56.tar.gz
 onnxruntime-1.28.2-submodule-libprotobuf-mutator-7a2ed51.tar.gz  sha256:d51365191580c4bf5e9ff104eebcfe34f7ff5f471006d7a460c15dcb3657501c  https://github.com/google/libprotobuf-mutator/archive/7a2ed51a6b682a83e345ff49fc4cfd7ca47550db.tar.gz
 
-# What that build fetched ("-- Fetch ... from" in the run's log), with the SHA-1 that ONNX
-# Runtime's cmake/deps.txt gives each. The rest of deps.txt (GPU, mobile, web and test
-# dependencies) wasn't fetched.
+# What those builds fetched ("-- Fetch ... from" in their logs), with the SHA-1 that ONNX
+# Runtime's cmake/deps.txt gives each: all twelve on Linux, all but cpuinfo on macOS. The rest
+# of deps.txt (GPU, mobile, web and test dependencies) wasn't fetched.
 onnxruntime-dep-abseil-cpp-20250814.0.zip  sha1:a9eb1d648cbca4d4d788737e971a6a7a63726b07  https://github.com/abseil/abseil-cpp/archive/refs/tags/20250814.0.zip
 onnxruntime-dep-date-3.0.1.zip  sha1:2dac0c81dc54ebdd8f8d073a75c053b04b56e159  https://github.com/HowardHinnant/date/archive/refs/tags/v3.0.1.zip
 onnxruntime-dep-eigen-1d8b82b07408.zip  sha1:05b19b49e6fbb91246be711d801160528c135e34  https://github.com/eigen-mirror/eigen/archive/1d8b82b0740839c0de7f1242a3585e3390ff5f33/eigen-1d8b82b0740839c0de7f1242a3585e3390ff5f33.zip
