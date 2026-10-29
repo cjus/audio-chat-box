@@ -25,7 +25,7 @@ demo from Docker Hub and run it. You speak, it shows what it heard, and it reads
 
 ```sh
 docker pull pnxstudios/audio-chat-box-demo
-docker run --rm --platform linux/amd64 -p 127.0.0.1:8080:8080 pnxstudios/audio-chat-box-demo
+docker run --rm -p 127.0.0.1:8080:8080 pnxstudios/audio-chat-box-demo
 ```
 
 Then open **http://localhost:8080** (that address, not `127.0.0.1`), press Record and allow
@@ -33,8 +33,8 @@ the microphone. You can also type text and hear it in any of Kokoro's 54 voices.
 stops it.
 
 The image (about 880 MB to download) carries the program and its models, Kokoro and
-Parakeet, so it runs with no network, account or API key. It is built for Linux amd64; on
-Apple Silicon, Docker runs it under emulation, which works but is slower. This is a speech
+Parakeet, so it runs with no network, account or API key. It runs natively on x86-64 and
+arm64 (Apple Silicon too): Docker picks the right one. This is a speech
 demo, not an LLM chatbot. [The Docker demo guide](docs/docker-demo.md) covers building the
 image yourself, running it with fewer privileges, the models' licences, privacy, browser
 requirements and limits.

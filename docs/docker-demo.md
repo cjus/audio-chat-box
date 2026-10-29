@@ -22,7 +22,7 @@ to download, 1.2 GB once pulled.
 
 ```sh
 docker pull pnxstudios/audio-chat-box-demo
-docker run --rm --platform linux/amd64 -p 127.0.0.1:8080:8080 pnxstudios/audio-chat-box-demo
+docker run --rm -p 127.0.0.1:8080:8080 pnxstudios/audio-chat-box-demo
 ```
 
 Open **http://localhost:8080** on the same machine once the page's model status says ready
@@ -32,15 +32,22 @@ page's Cancel control stops the recording/request. Ctrl+C stops the container.
 
 **The image carries its models**, Kokoro and Parakeet, so it needs no network, volume or
 account to run, and never tries to download a model (`AUDIO_CHAT_BOX_OFFLINE=1`). It is
-built for **Linux amd64 only**: on Apple Silicon, `--platform linux/amd64` runs it under
-Docker's emulation, slower (on the Mac it was tested on, about 4 s to speak a phrase, against
-under 1 s for the program built natively); native arm64 is not claimed supported.
+built for **linux/amd64 and linux/arm64**, and Docker pulls the one for its machine, so it runs
+natively on x86-64 servers and PCs, on Apple Silicon and on arm64 Linux servers.
+
+**Speech is slower in the image than in the program built for macOS.** On the Apple Silicon
+Mac it was tested on, Kokoro took about 4.5 s to read a nine-word sentence in the arm64 image
+(the amd64 image, emulated, about the same), against about 0.8 s for `audio-chat-box` built
+for macOS on the same machine; the time grows with the text. Transcription is fast in both
+(about 0.15 s for that sentence, natively). The Linux build of sherpa-onnx and ONNX Runtime is
+the difference, not the image or the server: the program alone, in the container, takes as
+long. Not yet explained.
 
 To run it with fewer privileges and capped resources (the server needs none of what these
 take away):
 
 ```sh
-docker run --rm --platform linux/amd64 -p 127.0.0.1:8080:8080 \
+docker run --rm -p 127.0.0.1:8080:8080 \
   --read-only --tmpfs /tmp:size=64m,mode=1777 \
   --cap-drop ALL --security-opt no-new-privileges:true \
   --cpus 4 --memory 6g --pids-limit 128 \
@@ -62,10 +69,12 @@ host privileges.
 From a clone of this repository, with about 10 GB of free disk for Docker's build cache:
 
 ```sh
-docker build --platform linux/amd64 -t pnxstudios/audio-chat-box-demo .
+docker build -t pnxstudios/audio-chat-box-demo .
 ```
 
-then run it as above. The build downloads Kokoro and Parakeet once (about **832 MB**) from
+then run it as above. That builds for the machine's own platform; `--platform linux/amd64` or
+`--platform linux/arm64` builds the other (under emulation, slower). The build picks
+sherpa-onnx's library for the platform and checks it against its SHA-256 (`Dockerfile`). The build downloads Kokoro and Parakeet once (about **832 MB**) from
 this repository's `models-v1` release, each checked against the size and SHA-256 in
 `src/models.rs` before it is unpacked (`tools/fetch-models.sh`), and keeps only the files
 `audio-chat-box` reads. Docker's build cache keeps them, so later builds download nothing
@@ -97,8 +106,8 @@ recording is started and stopped by hand.
   untrusted Docker host or forward this unauthenticated local service to other users.
 - The capped command allows up to **4 CPUs and 6 GiB RAM**, with a PID limit. These are protective
   demo defaults, **not measured minimums or performance guarantees**. Startup/loading and
-  inference may fail under insufficient Docker Desktop memory. CPU latency and emulated
-  amd64 performance need measurement on the target machine; no GPU setup is included.
+  inference may fail under insufficient Docker Desktop memory. CPU latency needs measurement
+  on the target machine; no GPU setup is included.
 - The Docker build needs network access to Rust crates, the pinned protocol source,
   sherpa-onnx, the `models-v1` release, the base image registry, Debian packages, and
   licence source files.
@@ -133,9 +142,9 @@ sherpa-onnx's prebuilt static library and of eSpeak NG's pronunciation data, wit
 built. Those are this repository's
 [`sources-v1` release](https://github.com/cjus/audio-chat-box/releases/tag/sources-v1), which
 [`tools/sources.sh`](../tools/sources.sh) gathers; the image carries its README as
-`/usr/share/audio-chat-box/SOURCES.md`. It was put together for sherpa-onnx 1.13.8 on Linux
-x86-64, and says how the build of each library, and the eSpeak NG commit that compiled the
-data, were found.
+`/usr/share/audio-chat-box/SOURCES.md`. It covers sherpa-onnx 1.13.8's libraries for both of
+the image's platforms (and for macOS), and says how the build of each library, and the
+eSpeak NG commit that compiled the data, were found.
 
 ## Publishing the image
 
@@ -153,11 +162,20 @@ Build from a commit on `main` that anyone can find, tag it with its version and 
 ```sh
 docker login -u pnxstudios           # an access token as the password
 git checkout main && git pull
-docker build --platform linux/amd64 --build-arg REVISION=$(git rev-parse HEAD) \
-  -t pnxstudios/audio-chat-box-demo:0.1.0 -t pnxstudios/audio-chat-box-demo:latest .
-docker push pnxstudios/audio-chat-box-demo:0.1.0
-docker push pnxstudios/audio-chat-box-demo:latest
+for arch in amd64 arm64; do
+  docker build --platform linux/$arch --build-arg REVISION=$(git rev-parse HEAD) \
+    -t pnxstudios/audio-chat-box-demo:0.2.0-$arch .
+  docker push pnxstudios/audio-chat-box-demo:0.2.0-$arch
+done
+# One tag for both platforms, made from the two images just pushed:
+docker buildx imagetools create -t pnxstudios/audio-chat-box-demo:0.2.0 \
+  -t pnxstudios/audio-chat-box-demo:latest \
+  pnxstudios/audio-chat-box-demo:0.2.0-amd64 pnxstudios/audio-chat-box-demo:0.2.0-arm64
 ```
+
+Each platform is built and pushed as its own image first, so what is published is exactly
+what was built (and can be run and checked before the shared tag is made), and Docker's
+classic image store, which holds one platform an image, is enough.
 
 ## Verification
 
