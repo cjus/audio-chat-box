@@ -74,7 +74,13 @@ for line in sys.stdin:
         assert request('/api/speak',json.dumps({'text':'x'*1001}).encode())[0] == 400
         oversized = socket.create_connection(('127.0.0.1',8080))
         oversized.sendall(b'POST /api/transcribe HTTP/1.1\r\nHost: localhost:8080\r\nOrigin: http://localhost:8080\r\nContent-Length: 960045\r\n\r\n')
-        assert oversized.recv(1024).startswith(b'HTTP/1.1 400')
+        # TCP may split the reply anywhere: read until the status line is whole.
+        reply = b''
+        while b'\r\n' not in reply:
+            chunk = oversized.recv(1024)
+            if not chunk: break
+            reply += chunk
+        assert reply.startswith(b'HTTP/1.1 400')
         oversized.close()
         # Abandon an HTTP request while its fake native inference continues. Repeated
         # new requests must remain busy rather than creating abandoned native jobs.

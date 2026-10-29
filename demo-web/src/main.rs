@@ -312,12 +312,15 @@ fn playback_wav(bytes: &[u8]) -> Result<Vec<u8>, &'static str> {
     Ok(output.into_inner())
 }
 fn response(stream: &mut TcpStream, status: &str, mime: &str, body: &[u8]) {
-    let _ = write!(
-        stream,
+    // One write: `write!` on an unbuffered stream sends each formatted piece as its own
+    // segment, so a client could read "HTTP/1.1 " alone.
+    let mut message = format!(
         "HTTP/1.1 {status}\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; media-src 'self' blob:; worker-src 'self'; connect-src 'self'; frame-ancestors 'none'\r\nPermissions-Policy: microphone=(self)\r\n\r\n",
         body.len()
-    );
-    let _ = stream.write_all(body);
+    )
+    .into_bytes();
+    message.extend_from_slice(body);
+    let _ = stream.write_all(&message);
     if status.starts_with('4') {
         // Deliver the rejection before closing an unread request body (otherwise TCP may
         // reset the connection and hide the HTTP error). Drain with a strict time/byte cap.
