@@ -36,12 +36,13 @@ kissfft-febd4caeed32.zip  sha256:497103e664168ebe39580b757adbe616f6cf85a16572af5
 espeak-ng-8593723f10cf.zip  sha256:cc8092f23a28ccd79b1c5e62984a4c4ac1959d2d0b8193ac208d728c620bd5ed  https://github.com/csukuangfj/espeak-ng/archive/8593723f10cfd9befd50de447f14bf0a9d2a14a4.zip
 
 # ONNX Runtime, which sherpa-onnx links prebuilt from csukuangfj/onnxruntime-libs: on Linux
-# onnxruntime-linux-x64-static_lib-1.28.2-glibc2_17.zip (cmake/onnxruntime-linux-x86_64-static.cmake),
+# onnxruntime-linux-x64-static_lib-1.28.2-glibc2_17.zip (cmake/onnxruntime-linux-x86_64-static.cmake)
+# and onnxruntime-linux-aarch64-static_lib-1.28.2-glibc2_17.zip (-linux-aarch64-static.cmake),
 # on macOS onnxruntime-osx-universal2-static_lib-1.28.2.zip (cmake/onnxruntime-osx-universal-static.cmake),
-# both built by csukuangfj/onnxruntime-build at 6314c7b (GitHub Actions runs 33741118168,
-# linux-217.yaml, and 33741118112, macos-universal2.yaml, which also patch ONNX Runtime's CMake
-# files) from Microsoft's tag v1.28.2 (33ca962) with its submodules (pinned here).
-# tools/sources/build-logs has their logs.
+# all built by csukuangfj/onnxruntime-build at 6314c7b (GitHub Actions runs 33741118168,
+# linux-217.yaml; 33741118071, aarch64-217.yaml; and 33741118112, macos-universal2.yaml, which
+# also patch ONNX Runtime's CMake files) from Microsoft's tag v1.28.2 (33ca962) with its
+# submodules (pinned here). tools/sources/build-logs has their logs.
 onnxruntime-build-6314c7b.tar.gz  sha256:eb4197b30e7b8350f34e69c1deb4e807159d7b377e640146d545e95e7d48d7a5  https://github.com/csukuangfj/onnxruntime-build/archive/6314c7b252578dc0b8ddd3919b593c4359812818.tar.gz
 onnxruntime-1.28.2.tar.gz  sha256:889281e9b54b65664b1628fa28bab05b1238f388ad30c179dbe5bc15655a7532  https://github.com/microsoft/onnxruntime/archive/33ca9628233dc8f002435e868d4c2e9f82766ca1.tar.gz
 onnxruntime-1.28.2-submodule-onnx-2bb5046.tar.gz  sha256:fc8cd173cd3a942eb30cb04a95b10d91d9d7d86f6d34222cb931021129075d03  https://github.com/onnx/onnx/archive/2bb50465112feca9003e1ed654d77f01ff1415ca.tar.gz

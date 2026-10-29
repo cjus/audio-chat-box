@@ -11,11 +11,12 @@ links, as the builds that made the library fetched them. Each archive keeps its 
 archive named below can be downloaded from it, with `SHA256SUMS`.
 
 It covers every copy of `audio-chat-box` built with sherpa-onnx **1.13.8** (`Cargo.toml`) for
-**Linux x86-64** and **macOS** (Apple silicon and Intel), whose libraries are:
+**Linux** (x86-64 and arm64) and **macOS** (Apple silicon and Intel), whose libraries are:
 
 | Platform | sherpa-onnx's static library | SHA-256 |
 | --- | --- | --- |
 | Linux x86-64 | `sherpa-onnx-v1.13.8-linux-x64-static-lib.tar.bz2` | `e1fdc5b67530e15741ef897fa5ffff297056f3bf0c6d829a27af9225a4c4b5a6` |
+| Linux arm64 | `sherpa-onnx-v1.13.8-linux-aarch64-static-lib.tar.bz2` | `77983e3cf29aa60f2e531d249dbd01d15596530550c8db2e9e02fc6a655da6bb` |
 | macOS arm64 | `sherpa-onnx-v1.13.8-osx-arm64-static-lib.tar.bz2` | `9091bf160dc7fdacedbc906b212badf53c2993f4e5277a0e03998e96c31d60da` |
 | macOS x86-64 | `sherpa-onnx-v1.13.8-osx-x64-static-lib.tar.bz2` | `a3f88da3e54c850a12d61431e73f8affcd1f13738b75b768847dd79541835b4b` |
 
@@ -44,32 +45,38 @@ PortAudio's source isn't here. `sherpa-onnx-1.13.8.tar.gz` has the C++ API's any
 
 ## How each was built
 
-- **sherpa-onnx's static library for Linux**: its `.github/workflows/linux.yaml` at
-  `v1.13.8` (GitHub Actions run 34486043450, job "Release shared-OFF tts-ON"), in the
-  `quay.io/pypa/manylinux2014_x86_64` image, with shared libraries off. Its CMake files
-  (`cmake/*.cmake`) fetch the archives above, each checked by the SHA-256 they give it.
-- **sherpa-onnx's static libraries for macOS**: its `.github/workflows/macos.yaml` at
-  `v1.13.8` (run 34486043393, job "Release static tts-ON macos-latest arm64;x86_64"), which
-  builds one universal library for both architectures from the same CMake files and archives,
-  then cuts the arm64 and x86-64 libraries out of it with `lipo -thin`. Being universal, it
-  links the universal2 ONNX Runtime (`cmake/onnxruntime-osx-universal-static.cmake`): the
-  arm64 slice of `onnxruntime-osx-universal2-static_lib-1.28.2.zip`'s `libonnxruntime.a` is
-  byte for byte the `libonnxruntime.a` of the arm64 library.
-  kaldi-decoder's own `cmake/` would fetch Eigen 3.4.0 and kaldifst's OpenFst 2026-04-10, but
-  sherpa-onnx's `cmake/` comes first in CMake's module path, so its `eigen.cmake` (5.0.1) and
-  `openfst.cmake` (2026-07-09) are the ones used.
-- **ONNX Runtime 1.28.2**, which sherpa-onnx links prebuilt
-  (`onnxruntime-linux-x64-static_lib-1.28.2-glibc2_17.zip` from `csukuangfj/onnxruntime-libs`):
-  `csukuangfj/onnxruntime-build` at commit `6314c7b` (`.github/workflows/linux-217.yaml`,
-  GitHub Actions run 33741118168, which made that file), in
-  `quay.io/pypa/manylinux2014_x86_64`, from Microsoft's tag `v1.28.2` (commit `33ca962`) with
-  its submodules, after applying that repository's patch to ONNX Runtime's CMake files. The
-  build fetched the twelve `onnxruntime-dep-*` archives ("-- Fetch ... from" in the run's log);
-  protoc 21.12 ran as a build tool. The rest of ONNX Runtime's `cmake/deps.txt` (GPU, mobile,
-  web and test dependencies) wasn't fetched. For macOS,
-  `onnxruntime-osx-universal2-static_lib-1.28.2.zip` was built by the same commit
-  (`.github/workflows/macos-universal2.yaml`, run 33741118112) from the same ONNX Runtime
-  commit and submodules, and fetched the same archives but cpuinfo.
+Every one is built from sherpa-onnx's CMake files (`cmake/*.cmake`) at `v1.13.8`, which fetch
+the archives above, each checked by the SHA-256 they give it. kaldi-decoder's own `cmake/`
+would fetch Eigen 3.4.0 and kaldifst's OpenFst 2026-04-10, but sherpa-onnx's `cmake/` comes
+first in CMake's module path, so its `eigen.cmake` (5.0.1) and `openfst.cmake` (2026-07-09)
+are the ones used (each build's log shows it).
+
+- **sherpa-onnx's static library for Linux x86-64**: its `.github/workflows/linux.yaml`
+  (GitHub Actions run 34486043450, job "Release shared-OFF tts-ON"), in the
+  `quay.io/pypa/manylinux2014_x86_64` image, with shared libraries off.
+- **sherpa-onnx's static library for Linux arm64**: its
+  `.github/workflows/aarch64-linux-gnu-static.yaml` (run 34486043530, job "aarch64 static lib
+  test (ubuntu-22.04-arm)"), built on an arm64 Ubuntu 22.04 runner.
+- **sherpa-onnx's static libraries for macOS**: its `.github/workflows/macos.yaml` (run
+  34486043393, job "Release static tts-ON macos-latest arm64;x86_64"), which builds one
+  universal library for both architectures, then cuts the arm64 and x86-64 libraries out of it
+  with `lipo -thin`. Being universal, it links the universal2 ONNX Runtime
+  (`cmake/onnxruntime-osx-universal-static.cmake`).
+- **ONNX Runtime 1.28.2**, which sherpa-onnx links prebuilt from `csukuangfj/onnxruntime-libs`:
+  `csukuangfj/onnxruntime-build` at commit `6314c7b` built each from Microsoft's tag `v1.28.2`
+  (commit `33ca962`) with its submodules, after applying that repository's patch to ONNX
+  Runtime's CMake files; protoc 21.12 ran as a build tool. Each build fetched the
+  `onnxruntime-dep-*` archives ("-- Fetch ... from" in its log); the rest of ONNX Runtime's
+  `cmake/deps.txt` (GPU, mobile, web and test dependencies) wasn't fetched.
+
+  | Platform | ONNX Runtime (`onnxruntime-libs` `v1.28.2`) | Built by | Fetched |
+  | --- | --- | --- | --- |
+  | Linux x86-64 | `onnxruntime-linux-x64-static_lib-1.28.2-glibc2_17.zip` | `linux-217.yaml`, run 33741118168, in `quay.io/pypa/manylinux2014_x86_64` | all twelve |
+  | Linux arm64 | `onnxruntime-linux-aarch64-static_lib-1.28.2-glibc2_17.zip` | `aarch64-217.yaml`, run 33741118071 | all twelve |
+  | macOS | `onnxruntime-osx-universal2-static_lib-1.28.2.zip` | `macos-universal2.yaml`, run 33741118112 | all but cpuinfo |
+
+  Each library's `libonnxruntime.a` is that build's, byte for byte (on macOS, its arm64 slice
+  is the arm64 library's).
 
 The logs of all these runs are in the audio-chat-box repository, in
 [`tools/sources/build-logs/`](https://github.com/cjus/audio-chat-box/tree/main/tools/sources/build-logs),

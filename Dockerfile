@@ -1,18 +1,25 @@
 # Local demonstration image. Publishing it distributes a GPL-3.0-or-later program: read
 # "Publishing the image" in docs/docker-demo.md first.
-# Only the Linux x86-64 native archive below has been checksum-verified.
+# Builds for linux/amd64 and linux/arm64, the platforms whose sherpa-onnx library is checked
+# below and whose source the sources-v1 release holds (tools/sources/README.md).
 FROM rust:1.97.1-bookworm AS build
 ARG TARGETARCH
-RUN test "$TARGETARCH" = amd64
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl bzip2 \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /source
 COPY . .
-RUN mkdir -p /opt/sherpa \
+# sherpa-onnx's prebuilt static library for the platform, checked by its SHA-256: GitHub's
+# digest of the release asset, which for x86-64 is also the one CI checks.
+RUN case "$TARGETARCH" in \
+      amd64) arch=x64 sha256=e1fdc5b67530e15741ef897fa5ffff297056f3bf0c6d829a27af9225a4c4b5a6 ;; \
+      arm64) arch=aarch64 sha256=77983e3cf29aa60f2e531d249dbd01d15596530550c8db2e9e02fc6a655da6bb ;; \
+      *) echo "no checked sherpa-onnx library for $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && archive="sherpa-onnx-v1.13.8-linux-$arch-static-lib.tar.bz2" \
+    && mkdir -p /opt/sherpa \
     && curl --fail --show-error --location --retry 3 \
-      https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-v1.13.8-linux-x64-static-lib.tar.bz2 \
-      -o /opt/sherpa/sherpa-onnx-v1.13.8-linux-x64-static-lib.tar.bz2 \
-    && echo 'e1fdc5b67530e15741ef897fa5ffff297056f3bf0c6d829a27af9225a4c4b5a6  /opt/sherpa/sherpa-onnx-v1.13.8-linux-x64-static-lib.tar.bz2' | sha256sum --check
+      "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/$archive" -o "/opt/sherpa/$archive" \
+    && echo "$sha256  /opt/sherpa/$archive" | sha256sum --check
 ENV SHERPA_ONNX_ARCHIVE_DIR=/opt/sherpa
 RUN cargo build --release --locked \
     && cargo build --release --locked --manifest-path demo-web/Cargo.toml
@@ -30,7 +37,8 @@ RUN tar --exclude='./target' --exclude='./demo-web/target' \
 # The models the demo uses, Kokoro and Parakeet, each checked against the size and SHA-256 in
 # src/models.rs before it is unpacked (tools/fetch-models.sh). This stage reads nothing else
 # from the source, so a change to the code neither downloads them again nor changes their layer.
-FROM debian:bookworm-slim AS models
+# The files are the same on every platform, so it runs once, on the building machine's own.
+FROM --platform=$BUILDPLATFORM debian:bookworm-slim AS models
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl bzip2 \
     && rm -rf /var/lib/apt/lists/*
 COPY src/models.rs /source/src/models.rs
