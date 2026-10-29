@@ -82,6 +82,16 @@ jobs:
       - name: Tests (the protocol's conformance sessions included)
         if: steps.scope.outputs.build == 'true'
         run: cargo test --locked
+      - name: Browser demo checks (synthetic audio only)
+        if: steps.scope.outputs.build == 'true'
+        run: |
+          cargo fmt --manifest-path demo-web/Cargo.toml --check
+          cargo clippy --manifest-path demo-web/Cargo.toml --all-targets --locked -- -D warnings
+          cargo test --manifest-path demo-web/Cargo.toml --locked
+          cargo build --manifest-path demo-web/Cargo.toml --locked
+          python3 demo-web/tests/smoke.py
+          node --test demo-web/static/*.test.mjs
+          RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path demo-web/Cargo.toml --no-deps --document-private-items --locked
       - name: Docs
         if: steps.scope.outputs.build == 'true'
         run: cargo doc --no-deps --document-private-items --locked
@@ -93,4 +103,6 @@ jobs:
           tool: cargo-deny
       - name: Check licences, advisories, bans and sources
         if: steps.scope.outputs.build == 'true'
-        run: cargo deny check
+        run: |
+          cargo deny check
+          cargo deny --manifest-path demo-web/Cargo.toml check

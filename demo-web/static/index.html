@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Parrot Service · audio-chat-box demo</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <main>
+    <header><p class="eyebrow">LOCAL SPEECH · OPEN SOURCE</p><h1>Parrot Service.</h1>
+      <p class="intro">Speak, see what it heard, and hear it back — powered by audio-chat-box.</p>
+      <p>This is a speech round-trip, not an AI chatbot. Parakeet transcribes your English speech; Kokoro reads the words back. No language model or paid API is involved.</p>
+    </header>
+    <section class="notice" aria-label="Model status"><strong>Models</strong><p id="models" role="status">Checking the local speech service…</p></section>
+    <section aria-labelledby="record-title">
+      <h2 id="record-title">1. Say something</h2>
+      <p>Up to 30 seconds. Your microphone is used only after you press Record.</p>
+      <div class="buttons"><button id="record" disabled>Record</button><button id="stop" disabled>Stop &amp; transcribe</button><button id="cancel" disabled>Cancel</button></div>
+      <p id="status" role="status" aria-live="polite">Preparing…</p>
+      <label for="recording">Your recording</label><audio id="recording" controls preload="none"></audio>
+    </section>
+    <section aria-labelledby="speak-title">
+      <h2 id="speak-title">2. Hear it back</h2>
+      <label for="text">Transcript — or type your own text</label>
+      <textarea id="text" maxlength="1000" rows="4" placeholder="Your transcript will appear here. You can edit it before reading it aloud."></textarea>
+      <label for="voice">Kokoro voice</label>
+      <select id="voice" disabled aria-describedby="voice-status"><option value="">Loading voices…</option></select>
+      <p id="voice-status" role="status">Voice choices load when the models are ready.</p>
+      <div class="buttons"><button id="speak" disabled>Read aloud</button><button id="clear">Clear</button></div>
+      <p>After transcription, the demo also generates the spoken version. Press Play below to hear it; your browser may block automatic playback.</p>
+      <label for="playback">Kokoro playback</label><audio id="playback" controls preload="none"></audio>
+    </section>
+    <footer><p>Audio and text go to the container serving this page, not to an external speech API. This page stores neither in browser storage. Use the documented localhost-only Docker command; this demo is not a public multi-user service.</p><p>Microphone access requires <code>http://localhost</code> or HTTPS and your permission. Remote HTTP addresses will not work. The Docker image includes the speech models; see the repository's Docker demo guide for their licences.</p></footer>
+  </main>
+</body>
+</html>

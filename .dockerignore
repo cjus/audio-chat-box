@@ -1,0 +1,11 @@
+.git
+**/target
+**/node_modules
+**/.DS_Store
+CLAUDE.local.md
+.env
+.env.*
+*.wav
+*.mp3
+*.webm
+models
