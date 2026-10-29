@@ -1,0 +1,63 @@
+# The source of every library in sherpa-onnx 1.13.8's prebuilt static library that
+# audio-chat-box links, as its builds fetched them: tools/sources.sh downloads each, checks
+# its hash, and writes the "sources" release (tools/sources/README.md says what is in it).
+#
+# One line a file: its name in the release, its hash (algorithm:hex) and where it comes from.
+# The hashes are upstream's wherever upstream pins the file (sherpa-onnx's cmake/*.cmake at
+# v1.13.8, kaldi-decoder's and kaldi-native-fbank's, ONNX Runtime's cmake/deps.txt at v1.28.2);
+# "pinned here" marks the ones this repository pinned, from GitHub's archives.
+
+# sherpa-onnx itself (pinned here): its C API and core, the CMake files that fetch the rest,
+# and the workflow that builds the static library (.github/workflows/).
+sherpa-onnx-1.13.8.tar.gz  sha256:b0374cc56dbc186d442ae73d5de743bb092470b640c4c50ce7b029044c0c4fa8  https://github.com/k2-fsa/sherpa-onnx/archive/refs/tags/v1.13.8.tar.gz
+
+# What sherpa-onnx's CMake files fetch (cmake/*.cmake at v1.13.8).
+kaldi-decoder-0.3.0.tar.gz  sha256:b9f34cfb4fd3b1344100eead79ef4d37aa15962274b9e3056de345021f76a1b0  https://github.com/k2-fsa/kaldi-decoder/archive/refs/tags/v0.3.0.tar.gz
+openfst-1.8.5-2026-07-09.tar.gz  sha256:2ff712a32952fcb01d351121a6bc8ccf4fdc6b2aa06ce8df2b3095dedd518c0e  https://github.com/csukuangfj/openfst/archive/refs/tags/v1.8.5-2026-07-09.tar.gz
+kaldi-native-fbank-1.22.3.tar.gz  sha256:9176cc66fc7ce1edf85cf355b06e320c57db6297df74277f575183468893cf61  https://github.com/csukuangfj/kaldi-native-fbank/archive/refs/tags/v1.22.3.tar.gz
+eigen-5.0.1.tar.gz  sha256:e9c326dc8c05cd1e044c71f30f1b2e34a6161a3b6ecf445d56b53ff1669e3dec  https://gitlab.com/libeigen/eigen/-/archive/5.0.1/eigen-5.0.1.tar.gz
+piper-phonemize-f3ff95afc036.zip  sha256:d9cca4e2bdc7d6dd8dffb96a4668283dbd3f77a9c194a3e530c1e8eba9406a5d  https://github.com/csukuangfj/piper-phonemize/archive/f3ff95afc03640bc1399e113e83361192a2fafb4.zip
+espeak-ng-ed530aa11304.zip  sha256:e4e262cbe34f7fe21f91f1ba3397f2728e1f30eafbae7853f2b753a9ed13f0dd  https://github.com/csukuangfj/espeak-ng/archive/ed530aa113046142eb5115cf2fc9157854d0ffe1.zip
+simple-sentencepiece-0.7.tar.gz  sha256:1748a822060a35baa9f6609f84efc8eb54dc0e74b9ece3d82367b7119fdc75af  https://github.com/pkufool/simple-sentencepiece/archive/refs/tags/v0.7.tar.gz
+nlohmann-json-3.12.0.tar.gz  sha256:4b92eb0c06d10683f7447ce9406cb97cd4b453be18d7279320f7b2f025c10187  https://github.com/nlohmann/json/archive/refs/tags/v3.12.0.tar.gz
+hclust-cpp-2026-02-25.tar.gz  sha256:8f14e024c709d73afb40ae69cb22de4b73dba67cbce40f2e518813da8139ab56  https://github.com/csukuangfj/hclust-cpp/archive/refs/tags/2026-02-25.tar.gz
+
+# What those fetch in turn: kaldi-decoder's kaldifst (cmake/kaldifst.cmake at v0.3.0) and
+# kaldi-native-fbank's KISS FFT (cmake/kissfft.cmake at v1.22.3). kaldi-decoder's own Eigen
+# and kaldifst's own OpenFst are not used: sherpa-onnx's cmake/ comes first in the module
+# path, so its eigen.cmake and openfst.cmake win.
+kaldifst-1.8.0.tar.gz  sha256:3f247b7e5a2409071202f5e2bc6200060f66728c0a3443c03923ad2723e040b3  https://github.com/k2-fsa/kaldifst/archive/refs/tags/v1.8.0.tar.gz
+kissfft-febd4caeed32.zip  sha256:497103e664168ebe39580b757adbe616f6cf85a16572af581ca7bc42d0ab13fd  https://github.com/mborgerding/kissfft/archive/febd4caeed32e33ad8b2e0bb5ea77542c40f18ec.zip
+
+# eSpeak NG's pronunciation data in Kokoro's model archive (espeak-ng-data/, from sherpa-onnx's
+# tts-models release, 2023-11-29) was compiled from the same fork at 8593723 (2023-11-27),
+# built with CMake (pinned here; tools/sources/README.md says how this was found). ed530aa
+# above is 9 commits on, none of them to the data's sources (dictsource/, phsource/).
+espeak-ng-8593723f10cf.zip  sha256:cc8092f23a28ccd79b1c5e62984a4c4ac1959d2d0b8193ac208d728c620bd5ed  https://github.com/csukuangfj/espeak-ng/archive/8593723f10cfd9befd50de447f14bf0a9d2a14a4.zip
+
+# ONNX Runtime, which sherpa-onnx links prebuilt (cmake/onnxruntime-linux-x86_64-static.cmake):
+# onnxruntime-linux-x64-static_lib-1.28.2-glibc2_17.zip from csukuangfj/onnxruntime-libs,
+# built by csukuangfj/onnxruntime-build at 6314c7b (GitHub Actions run 33741118168, linux-217.yaml,
+# which also patches ONNX Runtime's CMake files) from Microsoft's tag v1.28.2 (33ca962) with
+# its submodules (pinned here).
+onnxruntime-build-6314c7b.tar.gz  sha256:eb4197b30e7b8350f34e69c1deb4e807159d7b377e640146d545e95e7d48d7a5  https://github.com/csukuangfj/onnxruntime-build/archive/6314c7b252578dc0b8ddd3919b593c4359812818.tar.gz
+onnxruntime-1.28.2.tar.gz  sha256:889281e9b54b65664b1628fa28bab05b1238f388ad30c179dbe5bc15655a7532  https://github.com/microsoft/onnxruntime/archive/33ca9628233dc8f002435e868d4c2e9f82766ca1.tar.gz
+onnxruntime-1.28.2-submodule-onnx-2bb5046.tar.gz  sha256:fc8cd173cd3a942eb30cb04a95b10d91d9d7d86f6d34222cb931021129075d03  https://github.com/onnx/onnx/archive/2bb50465112feca9003e1ed654d77f01ff1415ca.tar.gz
+onnxruntime-1.28.2-submodule-emsdk-c0bb220.tar.gz  sha256:96765e55337d957e9182215ca72f666d8c7fabdc0d1d9fa98234343882084101  https://github.com/emscripten-core/emsdk/archive/c0bb220cb6e6f4e0fabb6f6db9efd53390ef5e56.tar.gz
+onnxruntime-1.28.2-submodule-libprotobuf-mutator-7a2ed51.tar.gz  sha256:d51365191580c4bf5e9ff104eebcfe34f7ff5f471006d7a460c15dcb3657501c  https://github.com/google/libprotobuf-mutator/archive/7a2ed51a6b682a83e345ff49fc4cfd7ca47550db.tar.gz
+
+# What that build fetched ("-- Fetch ... from" in the run's log), with the SHA-1 that ONNX
+# Runtime's cmake/deps.txt gives each. The rest of deps.txt (GPU, mobile, web and test
+# dependencies) wasn't fetched.
+onnxruntime-dep-abseil-cpp-20250814.0.zip  sha1:a9eb1d648cbca4d4d788737e971a6a7a63726b07  https://github.com/abseil/abseil-cpp/archive/refs/tags/20250814.0.zip
+onnxruntime-dep-date-3.0.1.zip  sha1:2dac0c81dc54ebdd8f8d073a75c053b04b56e159  https://github.com/HowardHinnant/date/archive/refs/tags/v3.0.1.zip
+onnxruntime-dep-eigen-1d8b82b07408.zip  sha1:05b19b49e6fbb91246be711d801160528c135e34  https://github.com/eigen-mirror/eigen/archive/1d8b82b0740839c0de7f1242a3585e3390ff5f33/eigen-1d8b82b0740839c0de7f1242a3585e3390ff5f33.zip
+onnxruntime-dep-flatbuffers-23.5.26.zip  sha1:59422c3b5e573dd192fead2834d25951f1c1670c  https://github.com/google/flatbuffers/archive/refs/tags/v23.5.26.zip
+onnxruntime-dep-gsl-4.2.1.zip  sha1:1094e3bb7a8af763dcb136ccd676e6e75e614eec  https://github.com/microsoft/GSL/archive/refs/tags/v4.2.1.zip
+onnxruntime-dep-mp11-boost-1.82.0.zip  sha1:9bc9e01dffb64d9e0773b2e44d2f22c51aace063  https://github.com/boostorg/mp11/archive/refs/tags/boost-1.82.0.zip
+onnxruntime-dep-nlohmann-json-3.11.3.zip  sha1:5e88795165cc8590138d1f47ce94ee567b85b4d6  https://github.com/nlohmann/json/archive/refs/tags/v3.11.3.zip
+onnxruntime-dep-onnx-1.22.0.zip  sha1:2b2cd58ac7a26df5371266149e0c76776330cdf1  https://github.com/onnx/onnx/archive/refs/tags/v1.22.0.zip
+onnxruntime-dep-protobuf-21.12.zip  sha1:7cf2733949036c7d52fda017badcab093fe73bfa  https://github.com/protocolbuffers/protobuf/archive/refs/tags/v21.12.zip
+onnxruntime-dep-cpuinfo-4628dc060ce4.zip  sha1:e58d4b47c16a982111c897e669ae4f1821a393d7  https://github.com/pytorch/cpuinfo/archive/4628dc060ce4e82345dc166bbac875609db4ff69.zip
+onnxruntime-dep-re2-2024-07-02.zip  sha1:646e1728269cde7fcef990bf4a8e87b047882e88  https://github.com/google/re2/archive/refs/tags/2024-07-02.zip
+onnxruntime-dep-safeint-3.0.28.zip  sha1:23f252040ff6cb9f1fd18575b32fa8fb5928daac  https://github.com/dcleblanc/SafeInt/archive/refs/tags/3.0.28.zip

@@ -113,7 +113,7 @@ label says so (`GPL-3.0-or-later AND Apache-2.0 AND CC-BY-4.0`):
 
 | In the image | Licence | What the licence asks of a copy, and where the image meets it |
 | --- | --- | --- |
-| `/usr/local/bin/audio-chat-box` | GPL-3.0-or-later, as a whole, because it links eSpeak NG (README, "Licence") | The licence text (`/usr/share/audio-chat-box/LICENSE-GPL-3.0`), every library's notices (`THIRD-PARTY-NOTICES.txt`, `native-licences/`) and the Corresponding Source, which a public image does not yet meet (below) |
+| `/usr/local/bin/audio-chat-box` | GPL-3.0-or-later, as a whole, because it links eSpeak NG (README, "Licence") | The licence text (`/usr/share/audio-chat-box/LICENSE-GPL-3.0`), every library's notices (`THIRD-PARTY-NOTICES.txt`, `native-licences/`) and the Corresponding Source (below; `SOURCES.md` says where) |
 | `/usr/local/bin/audio-chat-box-demo` | MIT OR Apache-2.0, its crates permissive (`cargo deny`); a separate program that talks to the other over pipes, not linked to it | Its crates' notices (`DEMO-THIRD-PARTY-NOTICES.txt`) and the licence texts (`LICENSE-MIT`, `LICENSE-APACHE`) |
 | `/models/kokoro-multi-lang-v1_0` | Kokoro-82M and sherpa-onnx's packaging: Apache-2.0 | The licence text, kept as `LICENSE` in that folder. Neither project ships an Apache NOTICE file, and no kept file is changed |
 | `/models/kokoro-multi-lang-v1_0/espeak-ng-data` | eSpeak NG's compiled pronunciation data: GPL-3.0-or-later | The licence text and its source, as for the program above |
@@ -127,28 +127,25 @@ CppJieba's dictionaries (MIT), so their notices aren't needed. Leaving files out
 by every licence here; nothing kept is changed.
 
 **A public image owes its users the Corresponding Source** of its GPL parts: this
-repository at the image's revision, the source of every library in sherpa-onnx's prebuilt
-static library at the versions in [`licences/README.md`](../licences/README.md), with how
-that library is built, and eSpeak NG's source for its pronunciation data. The image's
-`project-source.tar.gz` is only the first of these. The data's version is the open
-question: sherpa-onnx's Kokoro archive copies `espeak-ng-data/` from the
-`espeak-ng-data.tar.bz2` in its `tts-models` release (its `export-kokoro.yaml` workflow), and
-neither records which eSpeak NG commit compiled it. Finding that out (from sherpa-onnx, or by
-compiling candidate sources and comparing) is part of preparing the source. A link to this
-repository alone does not meet this. A private image that only you pull gives the program
-to no one else, so it owes nothing until it is shared.
+repository at the image's revision (its `project-source.tar.gz`, and the commit its
+`org.opencontainers.image.revision` label names), and the source of every library in
+sherpa-onnx's prebuilt static library and of eSpeak NG's pronunciation data, with how each was
+built. Those are this repository's
+[`sources-v1` release](https://github.com/cjus/audio-chat-box/releases/tag/sources-v1), which
+[`tools/sources.sh`](../tools/sources.sh) gathers; the image carries its README as
+`/usr/share/audio-chat-box/SOURCES.md`. It was put together for sherpa-onnx 1.13.8 on Linux
+x86-64, and says how the build of each library, and the eSpeak NG commit that compiled the
+data, were found.
 
 ## Publishing the image
 
 The image's OCI labels name this repository, its licences and, from the `REVISION` build
 argument, the commit it was built from.
 
-**Decide who may pull it first.** A private repository that only you pull from gives the
-program to no one else. A public one gives a GPL-3.0-or-later program, and eSpeak NG's data,
-to everyone who pulls it, so each must be able to get their Corresponding Source ("Licences
-and redistribution"). Arrange that, for example as a release of source archives in this
-repository that the image points to, before the image is public. The models' notices are
-already in the image.
+A public image gives a GPL-3.0-or-later program, and eSpeak NG's data, to everyone who pulls
+it, so each must be able to get their Corresponding Source ("Licences and redistribution"):
+publish the image only from a revision whose sherpa-onnx pin has its `sources-v<n>` release.
+The models' notices are already in the image.
 
 Build from a commit on `main` that anyone can find, tag it with its version and `latest`
 (what `docker pull pnxstudios/audio-chat-box-demo` fetches), then push both:
