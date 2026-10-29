@@ -7,6 +7,9 @@ is GPL-3.0-or-later. Whoever has a copy of it may have its Corresponding Source:
 from, and the source in this release of every library in that static library the program
 links, as the builds that made the library fetched them. Each archive keeps its own licence.
 
+**This release is <https://github.com/cjus/audio-chat-box/releases/tag/sources-v1>**: every
+archive named below can be downloaded from it, with `SHA256SUMS`.
+
 It covers every copy of `audio-chat-box` built with sherpa-onnx **1.13.8** (`Cargo.toml`) for
 **Linux x86-64**, whose library is `sherpa-onnx-v1.13.8-linux-x64-static-lib.tar.bz2`
 (SHA-256 `e1fdc5b67530e15741ef897fa5ffff297056f3bf0c6d829a27af9225a4c4b5a6`). That includes the
