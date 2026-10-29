@@ -40,5 +40,6 @@ must be able to lead to it, as the program is GPL-3.0-or-later.
 **When the sherpa-onnx pin moves**, look again at its `cmake/*.cmake` at the new tag (and
 kaldi-decoder's at the version it names), update the versions above, and take each licence
 file again from its source at the new version. Then update `tools/sources/sources.txt`,
-including which build made the prebuilt ONNX Runtime, run `tools/sources.sh`, and make a new
+including which build made the prebuilt ONNX Runtime, and `tools/sources/README.md`, which
+names its release (it is the image's `SOURCES.md`), run `tools/sources.sh`, and make a new
 `sources-v<n>` release.
