@@ -66,6 +66,12 @@
 //! was no better. Solrac's `docs/chat.md` has the tables. The recordings were made by speech
 //! synthesisers (macOS's and Kokoro), not people, so Carlos's own voice is the real test.
 //!
+//! The beam and the blank penalty were swept for cjus/chessgui#226 (beam 4 and 8, blank
+//! penalty 0, 0.5, 1 and 2), on those recordings and on fast ones (moves said as in a fast
+//! game, "rook e2", "queen g3", at 260 words a minute and Kokoro at 1.4), and on 145 of
+//! Carlos's own. Beam 8 was a little better on all three, and no slower: of 520 hearings of
+//! his moves, 452 named the move instead of 446. A blank penalty didn't help.
+//!
 //! ## Pitfalls
 //!
 //! - **"The knight is young."** Hotwords pull ordinary words towards them when the sound
@@ -125,12 +131,17 @@ const VOCABULARY_FILE: &str = "bpe.vocab";
 /// sherpa-onnx's beam search for transducers, which hotwords need.
 const DECODING_METHOD: &str = "modified_beam_search";
 
-/// How many transcripts the beam search keeps at each step: sherpa-onnx's default. In the
-/// bake-off, beam search alone cut word errors on chess phrases from 8.3% to 6.5%.
-pub const BEAM: i32 = 4;
+/// How many transcripts the beam search keeps at each step. In the bake-off, beam search
+/// alone (at 4, sherpa-onnx's default) cut word errors on chess phrases from 8.3% to 6.5%,
+/// and 8 cut them further, from 4.3% to 3.7% with Solrac's hotwords and from 31.3% to 28.3%
+/// on moves said quickly, with ordinary sentences unchanged and each command heard about as
+/// fast (module docs, "Why Parakeet, and these settings").
+pub const BEAM: i32 = 8;
 
 /// Taken from the blank's score at each step, before the pieces are compared: none, as
-/// sherpa-onnx has it by default (see the [module docs](self), "Blank penalty").
+/// sherpa-onnx has it by default (see the [module docs](self), "Blank penalty"). In the
+/// bake-off, 0.5 made no difference, and 1 and 2 made chess phrases worse, said quickly or
+/// not.
 pub const BLANK_PENALTY: f32 = 0.0;
 
 /// How a [`Transcriber`] decodes: the node's settings ([`Decoding::DEFAULT`]), or others for
