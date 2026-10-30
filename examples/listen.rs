@@ -6,7 +6,7 @@
 //! ```text
 //! cargo run --release --example listen -- \
 //!     <models folder> <file.wav>... [--end-silence MS] [--min-speech MS] [--lead-in MS]
-//!     [--hotwords FILE]
+//!     [--hotwords FILE] [--beam-size N] [--blank-penalty P] [--hotword-score SCORE]
 //! ```
 //!
 //! The models folder holds the unpacked archives, such as Solrac's `…/Solrac/models`, with
@@ -15,15 +15,18 @@
 //! and after the last, in pieces of 100 ms, as Solrac sends them. The options are the
 //! listen's: `--lead-in 0` hears each utterance without the sound from before its start, as
 //! before cjus/chessgui#240, and `--hotwords FILE` gives the hotwords in `FILE`, one a line.
+//! `--beam-size`, `--blank-penalty` and `--hotword-score` decode differently from the node
+//! (the `hear` module's `Decoding`), to measure other settings on real recordings.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use audio_chat_box::Samples;
-use audio_chat_box::hear::{Hotwords, Transcriber, samples_of_wav};
+use audio_chat_box::hear::{Decoding, Hotwords, Transcriber, samples_of_wav};
 use audio_chat_box::listen::{self, Detector, Event, Settings, Utterances};
 use audio_chat_box::models::{PARAKEET, SILERO_VAD};
+use audio_chat_box::speak::THREADS;
 
 /// The silence put before each file and after the last.
 const GAP: Duration = Duration::from_secs(1);
@@ -44,6 +47,35 @@ fn millis(args: &mut Vec<String>, name: &str) -> Result<Option<u64>, String> {
     Ok(Some(value))
 }
 
+/// Takes `--name NUMBER` out of `args`, if it is there.
+fn number(args: &mut Vec<String>, name: &str) -> Result<Option<f32>, String> {
+    let Some(at) = args.iter().position(|arg| arg == name) else {
+        return Ok(None);
+    };
+    let value = args
+        .get(at + 1)
+        .and_then(|value| value.parse().ok())
+        .ok_or(format!("{name} needs a number"))?;
+    args.drain(at..=at + 1);
+    Ok(Some(value))
+}
+
+/// The decoding the options in `args` ask for, taken out of them: the node's, but for those
+/// given.
+fn decoding(args: &mut Vec<String>) -> Result<Decoding, String> {
+    let mut decoding = Decoding::DEFAULT;
+    if let Some(beam) = number(args, "--beam-size")? {
+        decoding.beam = beam.max(1.0) as i32;
+    }
+    if let Some(penalty) = number(args, "--blank-penalty")? {
+        decoding.blank_penalty = penalty;
+    }
+    if let Some(score) = number(args, "--hotword-score")? {
+        decoding.hotword_score = score;
+    }
+    Ok(decoding)
+}
+
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let hotwords = match args.iter().position(|arg| arg == "--hotwords") {
@@ -61,6 +93,13 @@ fn main() -> ExitCode {
         }
         _ => Hotwords::none(),
     };
+    let decoding = match decoding(&mut args) {
+        Ok(decoding) => decoding,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
     let settings = millis(&mut args, "--end-silence").and_then(|end| {
         let min = millis(&mut args, "--min-speech")?;
         let lead_in = millis(&mut args, "--lead-in")?;
@@ -76,13 +115,15 @@ fn main() -> ExitCode {
     let [folder, files @ ..] = args.as_slice() else {
         eprintln!(
             "usage: listen <models folder> <file.wav>... [--end-silence MS] [--min-speech MS] \
-             [--lead-in MS] [--hotwords FILE]"
+             [--lead-in MS] [--hotwords FILE] [--beam-size N] [--blank-penalty P] \
+             [--hotword-score SCORE]"
         );
         return ExitCode::FAILURE;
     };
     let folder = PathBuf::from(folder);
     let loaded = Detector::load(&SILERO_VAD, &folder.join(SILERO_VAD.folder)).and_then(|vad| {
-        let transcriber = Transcriber::load(&PARAKEET, &folder.join(PARAKEET.folder))?;
+        let transcriber =
+            Transcriber::load_with(&PARAKEET, &folder.join(PARAKEET.folder), THREADS, decoding)?;
         Ok((vad, transcriber))
     });
     let (vad, transcriber) = match loaded {

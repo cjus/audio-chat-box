@@ -7,7 +7,8 @@
 //! ```text
 //! cargo run --release --example bakeoff -- \
 //!     <family> <model folder> <clips folder> [--threads N] [--snr DB] [--beam]
-//!     [--hotwords FILE] [--hotword-score SCORE] [--precision int8|fp16|fp32] [--misses]
+//!     [--hotwords FILE] [--hotword-score SCORE] [--beam-size N] [--blank-penalty P]
+//!     [--precision int8|fp16|fp32] [--misses]
 //! ```
 //!
 //! The model folder is one of sherpa-onnx's archives, unpacked
@@ -26,6 +27,12 @@
 //! `--hotwords FILE` gives each clip the hotwords in `FILE`, one a line, as a client would
 //! (`audio-chat-box`, `parakeet`, which it switches to beam search, and `qwen3`), with
 //! `--hotword-score` as their bonus for a transducer (default `HOTWORD_SCORE`).
+//!
+//! For a transducer (`audio-chat-box`, and `parakeet` with beam search), `--beam-size` is
+//! how many transcripts beam search keeps (default `BEAM`), and `--blank-penalty` is taken
+//! from the blank's score at each step (default `BLANK_PENALTY`; the node's `hear` module,
+//! "Blank penalty"). To sweep them, run the bake-off once for each setting, on the same
+//! clips.
 //!
 //! ## The clips
 //!
@@ -80,7 +87,9 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use audio_chat_box::Samples;
-use audio_chat_box::hear::{HOTWORD_SCORE, Hotwords, Transcriber, samples_of_wav, vocabulary};
+use audio_chat_box::hear::{
+    BEAM, BLANK_PENALTY, Decoding, HOTWORD_SCORE, Hotwords, Transcriber, samples_of_wav, vocabulary,
+};
 use audio_chat_box::models::PARAKEET;
 use audio_chat_box::speak::THREADS;
 use sherpa_onnx::{
@@ -91,9 +100,6 @@ use sherpa_onnx::{
 
 /// The language the clips are in, for the models that are told.
 const LANGUAGE: &str = "en";
-
-/// How many transcripts beam search keeps (sherpa-onnx's default, as the node's `BEAM`).
-const BEAM: i32 = 4;
 
 /// Below this, a sample is silence, not speech, when the speech's loudness is measured.
 const QUIET_SAMPLE: f32 = 0.01;
@@ -116,6 +122,10 @@ struct Options {
     /// The hotwords given with each clip, from `--hotwords`.
     hotwords: Vec<String>,
     hotword_score: f32,
+    /// How many transcripts beam search keeps, from `--beam-size`.
+    beam_size: i32,
+    /// Taken from the blank's score at each step, from `--blank-penalty`.
+    blank_penalty: f32,
     precision: String,
     misses: bool,
 }
@@ -199,6 +209,16 @@ fn run() -> Result<(), String> {
         options.threads,
         started.elapsed().as_secs_f64()
     );
+    let transducer = options.family == "audio-chat-box" || options.family == "parakeet";
+    if transducer && (options.beam || options.family == "audio-chat-box") {
+        println!(
+            "beam {}, blank penalty {}, hotword score {}, {} hotwords",
+            options.beam_size,
+            options.blank_penalty,
+            options.hotword_score,
+            options.hotwords.len()
+        );
+    }
 
     let load = |path: &Path| -> Result<Samples, String> {
         let wav = fs::read(path).map_err(|error| format!("{}: {error}", path.display()))?;
@@ -237,7 +257,8 @@ fn run() -> Result<(), String> {
 fn options(args: Vec<String>) -> Result<Options, String> {
     const USAGE: &str = "usage: bakeoff <audio-chat-box|parakeet|whisper|moonshine|qwen3|cohere> \
         <model folder> <clips folder> [--threads N] [--snr DB] [--beam] [--hotwords FILE] \
-        [--hotword-score SCORE] [--precision int8|fp16|fp32] [--misses]";
+        [--hotword-score SCORE] [--beam-size N] [--blank-penalty P] \
+        [--precision int8|fp16|fp32] [--misses]";
     let mut args = args.into_iter();
     let (Some(family), Some(folder), Some(clips)) = (args.next(), args.next(), args.next()) else {
         return Err(USAGE.to_string());
@@ -251,6 +272,8 @@ fn options(args: Vec<String>) -> Result<Options, String> {
         beam: false,
         hotwords: Vec::new(),
         hotword_score: HOTWORD_SCORE,
+        beam_size: BEAM,
+        blank_penalty: BLANK_PENALTY,
         precision: "int8".to_string(),
         misses: false,
     };
@@ -271,6 +294,8 @@ fn options(args: Vec<String>) -> Result<Options, String> {
                 options.beam = true;
             }
             "--hotword-score" => options.hotword_score = number(value()?)?,
+            "--beam-size" => options.beam_size = number(value()?)?.max(1.0) as i32,
+            "--blank-penalty" => options.blank_penalty = number(value()?)?,
             "--precision" => options.precision = value()?,
             "--misses" => options.misses = true,
             _ => return Err(format!("{flag}?\n{USAGE}")),
@@ -332,7 +357,12 @@ fn hearer(options: &Options) -> Result<Hearer, String> {
     let folder = &options.folder;
     if options.family == "audio-chat-box" {
         let hotwords = Hotwords::of(&options.hotwords)?;
-        return Transcriber::load_with_threads(&PARAKEET, folder, options.threads)
+        let decoding = Decoding {
+            beam: options.beam_size,
+            blank_penalty: options.blank_penalty,
+            hotword_score: options.hotword_score,
+        };
+        return Transcriber::load_with(&PARAKEET, folder, options.threads, decoding)
             .map(|transcriber| Hearer::Own(transcriber, hotwords))
             .map_err(|error| error.to_string());
     }
@@ -362,8 +392,9 @@ fn hearer(options: &Options) -> Result<Hearer, String> {
             config.model_config.model_type = Some("nemo_transducer".to_string());
             if options.beam {
                 config.decoding_method = Some("modified_beam_search".to_string());
-                config.max_active_paths = BEAM;
+                config.max_active_paths = options.beam_size;
             }
+            config.blank_penalty = options.blank_penalty;
             if !options.hotwords.is_empty() {
                 // As the node's transcriber does: a vocabulary made from `tokens.txt`, here
                 // in the temporary folder rather than the model's.
