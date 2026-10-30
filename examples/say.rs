@@ -3,12 +3,13 @@
 //!
 //! ```text
 //! cargo run --release --example say -- \
-//!     <model folder> <out.wav> "<text>" [voice] [threads]
+//!     <model folder> <out.wav> "<text>" [voice] [threads] [--speed SPEED]
 //! ```
 //!
 //! The model folder is an unpacked archive, such as Solrac's
 //! `…/models/kokoro-int8-multi-lang-v1_0`. The text is read a sentence at a time, as the chat
-//! reads a reply, and the sentences are joined in the file.
+//! reads a reply, and the sentences are joined in the file. `--speed` reads it faster (1.4)
+//! or slower (0.8) than Kokoro's normal pace, 1: for a transcription bake-off's fast clips.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -19,10 +20,26 @@ use std::time::Instant;
 use audio_chat_box::models::MODELS;
 use audio_chat_box::speak::{Speaker, THREADS, voice_number};
 
+/// Kokoro's normal pace.
+const NORMAL_SPEED: f32 = 1.0;
+
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    const USAGE: &str =
+        "usage: say <model folder> <out.wav> \"<text>\" [voice] [threads] [--speed SPEED]";
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let mut speed = NORMAL_SPEED;
+    if let Some(at) = args.iter().position(|arg| arg == "--speed") {
+        match args.get(at + 1).and_then(|value| value.parse().ok()) {
+            Some(value) if value > 0.0 => speed = value,
+            _ => {
+                eprintln!("--speed needs a number above 0\n{USAGE}");
+                return ExitCode::FAILURE;
+            }
+        }
+        args.drain(at..=at + 1);
+    }
     let [folder, out, text, rest @ ..] = args.as_slice() else {
-        eprintln!("usage: say <model folder> <out.wav> \"<text>\" [voice] [threads]");
+        eprintln!("{USAGE}");
         return ExitCode::FAILURE;
     };
     let voice = rest.first().map_or("am_michael", String::as_str);
@@ -60,7 +77,7 @@ fn main() -> ExitCode {
             continue;
         }
         let started = Instant::now();
-        let samples = match speaker.speak(sentence, number, 1.0, &stop) {
+        let samples = match speaker.speak(sentence, number, speed, &stop) {
             Ok(samples) => samples,
             Err(error) => {
                 eprintln!("{error}");

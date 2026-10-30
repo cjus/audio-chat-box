@@ -34,10 +34,25 @@
 //! pieces with Aho-Corasick's failure links, walked along with each transcript (its docs
 //! below).
 //!
+//! A matching piece gets the bonus twice in sherpa-onnx 1.13.8's beam search for NeMo
+//! transducers: it is added to the piece's score before the [`BEAM`] best are picked, so a
+//! hotword can be picked even when its sound is unlikely, and that boosted score is the one
+//! the transcript keeps, to which the trie's own bonus is then added
+//! (`offline-transducer-modified-beam-search-nemo-decoder.cc`, around lines 263 and 351).
+//! So [`HOTWORD_SCORE`] acts as about twice its value.
+//!
 //! sherpa-onnx matches hotwords piece by piece, so it splits each into the model's pieces
 //! with a SentencePiece vocabulary (`bpe.vocab`). sherpa-onnx's archive of Parakeet doesn't
 //! include one, so [`Transcriber::load`] writes one into the model's folder from
 //! `tokens.txt` ([`vocabulary`]).
+//!
+//! ## Blank penalty
+//!
+//! At each step a transducer may write a piece or the blank, which writes nothing and moves
+//! on. A blank penalty ([`BLANK_PENALTY`], [`Decoding`]) is taken from the blank's score
+//! before the scores are compared, so a word said quickly and quietly, whose pieces only
+//! narrowly lose to the blank, is written instead of dropped. Too much of it writes pieces
+//! where nothing was said. sherpa-onnx applies it in greedy and beam search alike.
 //!
 //! ## Why Parakeet, and these settings
 //!
@@ -113,6 +128,37 @@ const DECODING_METHOD: &str = "modified_beam_search";
 /// How many transcripts the beam search keeps at each step: sherpa-onnx's default. In the
 /// bake-off, beam search alone cut word errors on chess phrases from 8.3% to 6.5%.
 pub const BEAM: i32 = 4;
+
+/// Taken from the blank's score at each step, before the pieces are compared: none, as
+/// sherpa-onnx has it by default (see the [module docs](self), "Blank penalty").
+pub const BLANK_PENALTY: f32 = 0.0;
+
+/// How a [`Transcriber`] decodes: the node's settings ([`Decoding::DEFAULT`]), or others for
+/// measuring them (the bake-off's and the `listen` example's options).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Decoding {
+    /// How many transcripts the beam search keeps at each step ([`BEAM`]).
+    pub beam: i32,
+    /// Taken from the blank's score at each step ([`BLANK_PENALTY`]).
+    pub blank_penalty: f32,
+    /// The bonus for each piece of a hotword ([`HOTWORD_SCORE`]).
+    pub hotword_score: f32,
+}
+
+impl Decoding {
+    /// The node's settings: [`BEAM`], [`BLANK_PENALTY`] and [`HOTWORD_SCORE`].
+    pub const DEFAULT: Decoding = Decoding {
+        beam: BEAM,
+        blank_penalty: BLANK_PENALTY,
+        hotword_score: HOTWORD_SCORE,
+    };
+}
+
+impl Default for Decoding {
+    fn default() -> Decoding {
+        Decoding::DEFAULT
+    }
+}
 
 /// The most hotwords one request may give: far more than the words of every legal move in a
 /// chess position. More is `InvalidParams`.
@@ -198,6 +244,16 @@ impl Transcriber {
         folder: &Path,
         threads: usize,
     ) -> Result<Transcriber, SpeechError> {
+        Transcriber::load_with(model, folder, threads, Decoding::DEFAULT)
+    }
+
+    /// [`Transcriber::load_with_threads`] decoding as `decoding` says, for measuring.
+    pub fn load_with(
+        model: &LocalModel,
+        folder: &Path,
+        threads: usize,
+        decoding: Decoding,
+    ) -> Result<Transcriber, SpeechError> {
         let file = |name: &str| -> Result<String, SpeechError> {
             let path = folder.join(name);
             if !path.exists() {
@@ -219,8 +275,9 @@ impl Transcriber {
         config.model_config.modeling_unit = Some("bpe".to_string());
         config.model_config.bpe_vocab = Some(vocabulary_file);
         config.decoding_method = Some(DECODING_METHOD.to_string());
-        config.max_active_paths = BEAM;
-        config.hotwords_score = HOTWORD_SCORE;
+        config.max_active_paths = decoding.beam;
+        config.blank_penalty = decoding.blank_penalty;
+        config.hotwords_score = decoding.hotword_score;
         let recognizer = OfflineRecognizer::create(&config).ok_or(SpeechError::WontLoad)?;
         Ok(Transcriber {
             recognizer,
