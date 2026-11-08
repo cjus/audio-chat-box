@@ -80,6 +80,7 @@ use cnp::voice::{
 };
 use cnp::{Id, Message, Notification, Request, RequestMethod, Response, ResponseError, code};
 
+use crate::align::{self, Piece};
 use crate::hear::{self, Hotwords, Transcriber};
 use crate::listen::{self, Detect, Detector, Event, Utterances};
 use crate::models::{self, LocalModel};
@@ -153,11 +154,21 @@ impl Speech for Speaker {
 pub trait Hearing: Send + Sync {
     /// What is said in `speech`, with `hotwords` favoured: empty if nothing was heard.
     fn transcribe(&self, speech: &Samples, hotwords: &Hotwords) -> Result<String, SpeechError>;
+
+    /// The word pieces heard in `speech`, and when each is said, for word times
+    /// (`voice/speak`'s `wordTimes`): none, by default, which gives no word times.
+    fn pieces(&self, _speech: &Samples) -> Result<Vec<Piece>, SpeechError> {
+        Ok(Vec::new())
+    }
 }
 
 impl Hearing for Transcriber {
     fn transcribe(&self, speech: &Samples, hotwords: &Hotwords) -> Result<String, SpeechError> {
         Transcriber::transcribe(self, speech, hotwords)
+    }
+
+    fn pieces(&self, speech: &Samples) -> Result<Vec<Piece>, SpeechError> {
+        Transcriber::transcribe_pieces(self, speech)
     }
 }
 
@@ -529,7 +540,7 @@ impl Node {
                     speak: self.speech.is_some(),
                     transcribe: self.hearing.is_some(),
                     listen: self.listening.is_some() && self.hearing.is_some(),
-                    word_times: false,
+                    word_times: self.speech.is_some() && self.hearing.is_some(),
                     hotwords: self.hearing.is_some(),
                     formats: vec![AudioFormat::Wav, AudioFormat::PcmF32],
                 }),
@@ -610,10 +621,38 @@ impl Node {
             .as_ref()
             .ok_or_else(|| unsupported("this node was started without a speech model"))?
             .ready()?;
+        // Word times take both models: Kokoro makes the speech, Parakeet hears it back.
+        let ears = if params.word_times {
+            Some(
+                self.hearing
+                    .as_ref()
+                    .ok_or_else(|| {
+                        unsupported("word times need a transcription model, and there is none")
+                    })?
+                    .ready()?,
+            )
+        } else {
+            None
+        };
         let (id, text) = (request.id.clone(), params.text);
         self.work(id.clone(), move |job| {
             match speaker.speak(&text, voice, speed, &job.stop) {
-                Ok(samples) => Some(Response::ok::<Speak>(id, &spoken(&samples, format))),
+                Ok(samples) => {
+                    let mut answer = spoken(&samples, format);
+                    if let Some(ears) = ears {
+                        if job.stop.load(Ordering::Relaxed) {
+                            return None;
+                        }
+                        // Speech that can't be heard back is still speech: it just has no
+                        // word times, and the client falls back to its own estimate.
+                        let total = samples.duration().as_secs_f32();
+                        answer.words = ears
+                            .pieces(&samples)
+                            .map(|pieces| align::align(&text, &pieces, total))
+                            .unwrap_or_default();
+                    }
+                    Some(Response::ok::<Speak>(id, &answer))
+                }
                 // A cancel stopped it, and has answered.
                 Err(SpeechError::Stopped) => None,
                 Err(error) => Some(Response::error(Some(id), internal(error.to_string()))),
@@ -1123,6 +1162,21 @@ mod tests {
                 false => format!("{heard}, with {}", hotwords.joined()),
             })
         }
+
+        /// Hears "Knight to f 3", as the fake speech's text is read.
+        fn pieces(&self, _speech: &Samples) -> Result<Vec<Piece>, SpeechError> {
+            let piece = |text: &str, start, duration| Piece {
+                text: text.to_string(),
+                start,
+                duration,
+            };
+            Ok(vec![
+                piece(" Knight", 0.0, 0.4),
+                piece(" to", 0.4, 0.2),
+                piece(" f", 0.6, 0.1),
+                piece("3", 0.7, 0.3),
+            ])
+        }
     }
 
     /// A Silero VAD for which a sample of 0.5 or more is speech, and anything else silence.
@@ -1293,6 +1347,34 @@ mod tests {
         let samples = hear::samples_of_pcm_f32(&bytes, raw.sample_rate).unwrap();
         assert_eq!(samples.samples, [0.21, 0.25]);
         assert_eq!(raw.duration_ms, 0, "two samples at 24 kHz");
+    }
+
+    #[test]
+    fn speech_asked_for_with_word_times_says_when_each_word_is_said() {
+        let (mut node, written) = ready_node(Duration::ZERO);
+        let params = json!({"text": "Knight to f3.", "format": "pcmF32", "wordTimes": true});
+        node.request(&request(1, "voice/speak", params));
+        let spoken = written.response(1).result::<Speak>().unwrap();
+        let words: Vec<_> = spoken
+            .words
+            .iter()
+            .map(|word| (word.text.as_str(), word.start_ms, word.end_ms))
+            .collect();
+        assert_eq!(
+            words,
+            [("Knight", 0, 400), ("to", 400, 600), ("f3.", 600, 1000)]
+        );
+
+        // Not asked for: not sent.
+        node.request(&request(2, "voice/speak", json!({"text": "Knight to f3."})));
+        assert!(
+            written
+                .response(2)
+                .result::<Speak>()
+                .unwrap()
+                .words
+                .is_empty()
+        );
     }
 
     #[test]

@@ -117,7 +117,7 @@ request that needs one it didn't offer is answered `Unsupported`.
 | `transcribe` | `voice/transcribe` | With `--hear` (the default) |
 | `listen` | `voice/listen` and its notifications | With `--listen silero-vad` |
 | `hotwords` | `hotwords` in `voice/transcribe` and `voice/listen` | Whenever it hears |
-| `wordTimes` | Each word's start and end | Never |
+| `wordTimes` | Each word's start and end, in `voice/speak` | Whenever it speaks and hears |
 | `formats` | The audio formats it reads and writes | `wav` and `pcmF32` |
 
 Audio formats: `wav` is a RIFF WAVE file, mono, with 16-bit integer or 32-bit float samples;
@@ -154,9 +154,18 @@ Text to speech. Params:
 | `voice` | string | A voice's id. Missing: the default |
 | `speed` | number | 1.0 is the voice's own pace |
 | `format` | string | The audio format wanted. Missing: `wav` |
+| `wordTimes` | boolean | Also say when each word is said |
 
 An unknown voice is `InvalidParams`. The result: `format`, `sampleRate`, `audio` (base64)
 and `durationMs`.
+
+**Word times.** With `wordTimes`, the result also has `words`: for each word of `text` (split
+at whitespace, and given exactly as written, punctuation and all), its `text`, `startMs` and
+`endMs` in the audio. audio-chat-box finds them the way WhisperX does: Parakeet hears its own
+speech back, and the words it heard are lined up against `text` letter by letter (`src/align.rs`),
+so a word said as "four" and heard as "4" still lines up. They are as accurate as Parakeet's
+80 ms frames, and take about a tenth of the speech's length to find. If the speech couldn't be
+heard back well enough, `words` is empty and the speech is still returned.
 
 ```json
 → {"jsonrpc": "2.0", "id": 20, "method": "voice/speak", "params": {"text": "Your table is ready.", "voice": "am_michael"}}

@@ -106,6 +106,7 @@ use std::sync::{Mutex, PoisonError};
 
 use sherpa_onnx::{OfflineRecognizer, OfflineRecognizerConfig, OfflineTransducerModelConfig};
 
+use crate::align::Piece;
 use crate::models::LocalModel;
 use crate::speak::THREADS;
 use crate::{Samples, SpeechError};
@@ -313,6 +314,36 @@ impl Transcriber {
         self.recognizer.decode(&stream);
         let heard = stream.get_result().ok_or(SpeechError::Unheard)?;
         Ok(heard.text.trim().to_string())
+    }
+}
+
+impl Transcriber {
+    /// Like [`Transcriber::transcribe`], but with the word pieces and when each is said, in
+    /// seconds from the start of `speech` ([`Piece`]). A piece that begins a
+    /// word starts with a space. The times are the transducer's own (TDT predicts each piece's
+    /// duration, in frames of 80 ms).
+    pub fn transcribe_pieces(&self, speech: &Samples) -> Result<Vec<Piece>, SpeechError> {
+        let _hearing = self.hearing.lock().unwrap_or_else(PoisonError::into_inner);
+        let rate = i32::try_from(speech.rate).map_err(|_| SpeechError::Unreadable)?;
+        if rate == 0 || speech.samples.is_empty() {
+            return Ok(Vec::new());
+        }
+        let stream = self.recognizer.create_stream();
+        stream.accept_waveform(rate, &speech.samples);
+        self.recognizer.decode(&stream);
+        let heard = stream.get_result().ok_or(SpeechError::Unheard)?;
+        let starts = heard.timestamps.unwrap_or_default();
+        let lengths = heard.durations.unwrap_or_default();
+        Ok(heard
+            .tokens
+            .into_iter()
+            .enumerate()
+            .map(|(i, text)| Piece {
+                text,
+                start: starts.get(i).copied().unwrap_or(0.0),
+                duration: lengths.get(i).copied().unwrap_or(0.0),
+            })
+            .collect())
     }
 }
 
