@@ -42,6 +42,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod align;
 pub mod hear;
 pub mod listen;
 pub mod models;
