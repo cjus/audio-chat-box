@@ -73,10 +73,10 @@ use cnp::lifecycle::{
 };
 use cnp::stdio::{ReadError, read_message};
 use cnp::voice::{
-    Audio, AudioFormat, AudioParams, Heard, HeardParams, Listen, ListenResult, Model, ModelState,
-    ModelStateChanged, ModelStateParams, Models, ModelsResult, Speak, SpeakResult, SpeechStarted,
-    SpeechStartedParams, Stage, Transcribe, TranscribeResult, VoiceCapabilities, Voices,
-    VoicesResult,
+    Audio, AudioFormat, AudioParams, Heard, HeardParams, Hearing as HearingNotice, HearingParams,
+    Listen, ListenResult, Model, ModelState, ModelStateChanged, ModelStateParams, Models,
+    ModelsResult, Speak, SpeakResult, SpeechStarted, SpeechStartedParams, Stage, Transcribe,
+    TranscribeResult, VoiceCapabilities, Voices, VoicesResult,
 };
 use cnp::{Id, Message, Notification, Request, RequestMethod, Response, ResponseError, code};
 
@@ -542,10 +542,12 @@ impl Node {
                     listen: self.listening.is_some() && self.hearing.is_some(),
                     word_times: self.speech.is_some() && self.hearing.is_some(),
                     hotwords: self.hearing.is_some(),
+                    partials: self.listening.is_some() && self.hearing.is_some(),
                     formats: vec![AudioFormat::Wav, AudioFormat::PcmF32],
                 }),
             },
             limits: Limits::default(),
+            resources: None,
         };
         Response::ok::<Initialize>(id, &result)
     }
@@ -727,6 +729,7 @@ impl Node {
         )
         .map_err(invalid)?;
         let hotwords = Hotwords::of(&params.hotwords).map_err(invalid)?;
+        let partials = Partials::of(params.partial_ms, settings.lead_in).map_err(invalid)?;
         if let Some(language) = &params.language {
             english_only(language)?;
         }
@@ -770,6 +773,7 @@ impl Node {
             listens: Arc::clone(&self.listens),
             received: 0,
             started: None,
+            partials,
         };
         thread::spawn(move || listening.run(&chunks));
         Ok(())
@@ -810,6 +814,94 @@ struct Listening {
     received: usize,
     /// Where the utterance being heard started, once `voice/speechStarted` has said so.
     started: Option<usize>,
+    /// What it says so far, if the listen asked for that.
+    partials: Option<Partials>,
+}
+
+/// The longest stretch of an utterance a partial hears: the last of it, for one that goes on
+/// longer, so that each stays quick to make.
+const PARTIAL_WINDOW: Duration = Duration::from_secs(15);
+
+/// The shortest time between partials, however often the client asks: each is a hearing of
+/// all the utterance so far, and the node hears one thing at a time.
+const MIN_PARTIAL_EVERY: Duration = Duration::from_millis(250);
+
+/// The most `partialMs` may be.
+const MAX_PARTIAL_MS: u64 = 10_000;
+
+/// A listen's live partials (`voice/hearing`): what the utterance being heard says so far,
+/// about every `every`, by hearing the audio since it started again. Each hearing takes about
+/// as long as the speech is, over how much faster than speech Parakeet is, and the listen's
+/// thread does it between chunks of audio, so the next waits `every` after the last was
+/// made, not after it began: partials slow down rather than pile up.
+struct Partials {
+    /// About how often to say.
+    every: Duration,
+    /// The lead-in each utterance is heard with, in samples.
+    lead_in: usize,
+    /// The audio of the last [`PARTIAL_WINDOW`] or so, and where its first sample is.
+    window: Vec<f32>,
+    window_from: usize,
+    /// When the last was made, or the utterance began.
+    last: Instant,
+    /// What the last said, so that the same words aren't said twice.
+    said: Option<String>,
+}
+
+impl Partials {
+    /// The listen's partials, if `partial_ms` asks for them: 0 or none is none.
+    fn of(partial_ms: Option<u64>, lead_in: Duration) -> Result<Option<Partials>, String> {
+        let Some(ms) = partial_ms.filter(|ms| *ms > 0) else {
+            return Ok(None);
+        };
+        if ms > MAX_PARTIAL_MS {
+            return Err(format!(
+                "partialMs is from 0 to {MAX_PARTIAL_MS} milliseconds"
+            ));
+        }
+        Ok(Some(Partials {
+            every: Duration::from_millis(ms).max(MIN_PARTIAL_EVERY),
+            lead_in: listen::samples_in(lead_in),
+            window: Vec::new(),
+            window_from: 0,
+            last: Instant::now(),
+            said: None,
+        }))
+    }
+
+    /// Keeps `samples`, the next the listen heard, `received` in all so far.
+    fn hear(&mut self, samples: &[f32], received: usize) {
+        if self.window.is_empty() {
+            self.window_from = received - samples.len();
+        }
+        self.window.extend_from_slice(samples);
+        let keep = listen::samples_in(PARTIAL_WINDOW);
+        // Trimmed in bigger steps than a chunk, so that it isn't a copy each time.
+        if self.window.len() > keep * 2 {
+            let drop = self.window.len() - keep;
+            self.window.drain(..drop);
+            self.window_from += drop;
+        }
+    }
+
+    /// The utterance that started at `start`, heard so far: its samples, if it is time.
+    fn due(&self, start: usize) -> Option<Samples> {
+        if self.last.elapsed() < self.every {
+            return None;
+        }
+        let from = start
+            .saturating_sub(self.lead_in)
+            .max(self.window_from)
+            .saturating_sub(self.window_from);
+        let samples = self.window.get(from..)?.to_vec();
+        // The last PARTIAL_WINDOW of a long one.
+        let keep = listen::samples_in(PARTIAL_WINDOW);
+        let skip = samples.len().saturating_sub(keep);
+        Some(Samples {
+            rate: listen::SAMPLE_RATE,
+            samples: samples[skip..].to_vec(),
+        })
+    }
 }
 
 impl Listening {
@@ -820,6 +912,9 @@ impl Listening {
             let (events, ended) = match chunks.recv() {
                 Ok(Chunk::Samples(samples)) => {
                     self.received += samples.len();
+                    if let Some(partials) = &mut self.partials {
+                        partials.hear(&samples, self.received);
+                    }
                     (self.session.hear(&samples), false)
                 }
                 Ok(Chunk::End) => (self.session.end(), true),
@@ -831,6 +926,9 @@ impl Listening {
                 return self
                     .job
                     .answer(&self.output, Response::error(Some(self.id), why));
+            }
+            if !ended {
+                self.hearing_so_far();
             }
             if ended {
                 // The detector may leave a start without its end (`listen`'s docs).
@@ -875,10 +973,42 @@ impl Listening {
         Ok(())
     }
 
+    /// Says what the utterance being heard says so far, if the listen asked for that and it
+    /// is time (see [`Partials`]). A failure to hear it is no failure of the listen: its
+    /// last hearing is made of all the audio anyway.
+    fn hearing_so_far(&mut self) {
+        let (Some(start), Some(partials)) = (self.started, &mut self.partials) else {
+            return;
+        };
+        let Some(speech) = partials.due(start) else {
+            return;
+        };
+        let heard = self.hearing.transcribe(&speech, &self.hotwords);
+        partials.last = Instant::now();
+        let Ok(text) = heard else {
+            return;
+        };
+        if partials.said.as_deref() == Some(text.as_str()) {
+            return;
+        }
+        partials.said = Some(text.clone());
+        let params = HearingParams {
+            id: self.id.clone(),
+            text,
+            start_ms: listen::millis_of(start),
+        };
+        let message = Notification::new::<HearingNotice>(&params).into();
+        send_unless_answered(&self.output, &self.job, message);
+    }
+
     /// Says that speech started at sample `at`, unless it has said so for this utterance.
     fn start(&mut self, at: usize) {
         if self.started.is_none() {
             self.started = Some(at);
+            if let Some(partials) = &mut self.partials {
+                partials.last = Instant::now();
+                partials.said = None;
+            }
             let params = SpeechStartedParams {
                 id: self.id.clone(),
                 start_ms: listen::millis_of(at),
@@ -1484,6 +1614,57 @@ mod tests {
     }
 
     #[test]
+    fn a_listen_that_asks_hears_what_is_said_so_far_while_it_is_said() {
+        let (mut node, written) = ready_node(Duration::ZERO);
+        // Asks for a partial every 250 ms (the least), with an endless-enough pause.
+        let params = json!({"format": "pcmF32", "sampleRate": 16000, "endSilenceMs": 5000,
+            "minSpeechMs": 5, "leadInMs": 0, "partialMs": 250});
+        node.request(&request(1, "voice/listen", params));
+        send_audio(&mut node, 1, Some(audio(0.9, 160)), false);
+        // Too soon for one.
+        thread::sleep(Duration::from_millis(50));
+        send_audio(&mut node, 1, Some(audio(0.9, 160)), false);
+        thread::sleep(Duration::from_millis(300));
+        send_audio(&mut node, 1, Some(audio(0.9, 160)), false);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !notifications(&written)
+            .iter()
+            .any(|(method, _)| method == "voice/hearing")
+        {
+            assert!(Instant::now() < deadline, "no partial came");
+            thread::sleep(Duration::from_millis(5));
+        }
+        send_audio(&mut node, 1, None, true);
+        assert!(written.response(1).result::<Listen>().is_ok());
+        let said = notifications(&written);
+        let methods: Vec<&str> = said.iter().map(|(method, _)| method.as_str()).collect();
+        assert_eq!(
+            methods,
+            ["voice/speechStarted", "voice/hearing", "voice/heard"]
+        );
+        // The first partial heard all the utterance up to the chunk after the wait; the last
+        // hearing heard all of it.
+        assert_eq!(said[1].1["startMs"], 0);
+        assert_eq!(said[1].1["text"], "480 samples at 16000 Hz");
+        assert_eq!(said[2].1["text"], "480 samples at 16000 Hz");
+    }
+
+    #[test]
+    fn a_listen_that_does_not_ask_hears_no_partials() {
+        let (mut node, written) = ready_node(Duration::ZERO);
+        node.request(&quick_listen(1));
+        send_audio(&mut node, 1, Some(audio(0.9, 160)), false);
+        thread::sleep(Duration::from_millis(300));
+        send_audio(&mut node, 1, Some(audio(0.9, 160)), true);
+        assert!(written.response(1).result::<Listen>().is_ok());
+        assert!(
+            notifications(&written)
+                .iter()
+                .all(|(method, _)| method != "voice/hearing")
+        );
+    }
+
+    #[test]
     fn the_clients_hotwords_reach_each_hearing_and_wrong_ones_are_refused() {
         let (mut node, written) = ready_node(Duration::ZERO);
         let recording = BASE64.encode([0u8; 16]);
@@ -1610,6 +1791,7 @@ mod tests {
             json!({"format": "pcmF32", "sampleRate": 0}),
             json!({"format": "pcmF32", "sampleRate": 16000, "endSilenceMs": 0}),
             json!({"format": "pcmF32", "sampleRate": 16000, "maxSpeechMs": 600000}),
+            json!({"format": "pcmF32", "sampleRate": 16000, "partialMs": 20000}),
             json!({"format": "pcmF32"}),
         ];
         for (n, params) in invalid_params.into_iter().enumerate() {

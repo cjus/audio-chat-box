@@ -100,7 +100,7 @@ notification **`exit`** ends it, with exit code 0 (1 if `shutdown` didn't come f
 
 ```json
 → {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocol": "1.0", "client": {"name": "my-app", "version": "1.0"}}}
-← {"jsonrpc": "2.0", "id": 1, "result": {"protocol": "1.0", "node": {"name": "audio-chat-box", "version": "0.1.0", "license": "GPL-3.0-or-later", "source": "https://github.com/cjus/audio-chat-box"}, "capabilities": {"voice": {"speak": true, "transcribe": true, "listen": true, "hotwords": true, "formats": ["wav", "pcmF32"]}}, "limits": {}}}
+← {"jsonrpc": "2.0", "id": 1, "result": {"protocol": "1.0", "node": {"name": "audio-chat-box", "version": "0.1.0", "license": "GPL-3.0-or-later", "source": "https://github.com/cjus/audio-chat-box"}, "capabilities": {"voice": {"speak": true, "transcribe": true, "listen": true, "hotwords": true, "partials": true, "formats": ["wav", "pcmF32"]}}, "limits": {}}}
 → {"jsonrpc": "2.0", "id": 99, "method": "shutdown"}
 ← {"jsonrpc": "2.0", "id": 99, "result": null}
 → {"jsonrpc": "2.0", "method": "exit"}
@@ -117,6 +117,7 @@ request that needs one it didn't offer is answered `Unsupported`.
 | `transcribe` | `voice/transcribe` | With `--hear` (the default) |
 | `listen` | `voice/listen` and its notifications | With `--listen silero-vad` |
 | `hotwords` | `hotwords` in `voice/transcribe` and `voice/listen` | Whenever it hears |
+| `partials` | `voice/hearing` and a listen's `partialMs` | With `--listen silero-vad` |
 | `wordTimes` | Each word's start and end, in `voice/speak` | Whenever it speaks and hears |
 | `formats` | The audio formats it reads and writes | `wav` and `pcmF32` |
 
@@ -226,6 +227,7 @@ answers a second with `Busy`. Params:
 | `minSpeechMs` | integer | Shorter sounds aren't speech (a cough, a click). Missing: 150 |
 | `maxSpeechMs` | integer | The longest one utterance may be: at this length it ends, pause or not. Missing: 30000 |
 | `leadInMs` | integer | How much of the audio from before an utterance's start it is heard with, so that a short first word said fast isn't cut off; 0 for none. Missing: 500 |
+| `partialMs` | integer | Send `voice/hearing` about this often while someone speaks (at least every 250 ms, at most 10000). Missing or 0: never |
 | `hotwords` | array of strings | Words and phrases likely to be said, in every utterance ([4](#4-what-it-can-do)). Missing: none |
 
 Wrong params are `InvalidParams`: a duration of 0 (but `leadInMs`), or over 10000 (60000 for
@@ -241,6 +243,13 @@ the node sends:
 
 - **`voice/speechStarted`**, `{"id": …, "startMs": …}`, once it is sure someone is speaking
   (after `minSpeechMs` of speech). `startMs` is about where they started.
+- **`voice/hearing`**, `{"id": …, "text": …, "startMs": …}`, only if the listen asked
+  (`partialMs`): what Parakeet makes of the utterance so far, heard again from its start (the
+  last 15 s of one that goes on longer) about every `partialMs` while it goes on. It is
+  for showing, not acting on: each replaces the one before and may change a word, and the
+  utterance's `voice/heard` replaces the last. A partial is made between chunks of audio and
+  the next waits `partialMs` after the last was made, so a slow machine sends fewer, not
+  later `voice/heard`s by more than one hearing.
 - **`voice/heard`**, once they have paused for `endSilenceMs` and the node has heard them:
   `id`, `text` (empty if no words were made out), `startMs` and `endMs`.
 
