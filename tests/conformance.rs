@@ -62,6 +62,11 @@ fn audio_chat_box_passes_every_conformance_session_that_applies() {
         }
     }
     assert!(failed.is_empty(), "failed:\n{}", failed.join("\n\n"));
+    // The default build doesn't offer `pronunciations` (the prebuilt sherpa-onnx can't take
+    // them), so its session is skipped there; with the feature it must run.
+    skipped.retain(|name| {
+        cfg!(not(feature = "pronunciations")) && !name.starts_with("pronunciations-bad-params")
+    });
     assert!(skipped.is_empty(), "skipped: {skipped:?}");
     // The voice's own sessions ran.
     for voice in [
@@ -72,7 +77,10 @@ fn audio_chat_box_passes_every_conformance_session_that_applies() {
         "listen-bad-params",
         "hotwords-bad-params",
         "audio-for-no-listen",
-    ] {
+    ]
+    .into_iter()
+    .chain(cfg!(feature = "pronunciations").then_some("pronunciations-bad-params"))
+    {
         assert!(
             passed.iter().any(|name| name == voice),
             "{voice} didn't run"

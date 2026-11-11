@@ -18,6 +18,7 @@ use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 use audio_chat_box::models::MODELS;
+use audio_chat_box::pronounce::Pronunciations;
 use audio_chat_box::speak::{Speaker, THREADS, voice_number};
 
 /// Kokoro's normal pace.
@@ -77,7 +78,7 @@ fn main() -> ExitCode {
             continue;
         }
         let started = Instant::now();
-        let samples = match speaker.speak(sentence, number, speed, &stop) {
+        let samples = match speaker.speak(sentence, number, speed, &Pronunciations::none(), &stop) {
             Ok(samples) => samples,
             Err(error) => {
                 eprintln!("{error}");
