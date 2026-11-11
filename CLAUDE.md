@@ -16,7 +16,10 @@ A maintainer's own instructions, if any, are in `CLAUDE.local.md`, which is not 
    are built in: a client gives its own hotwords and listen settings in its requests. Its
    recordings and phrase lists stay in its own repository.
 3. **Our code is `MIT OR Apache-2.0`**; every crate it depends on is permissive (`deny.toml`).
-   The program as a whole is GPL-3.0-or-later (README, "Licence"). Every copy of it goes with
+   The program as a whole is GPL-3.0-or-later (README, "Licence"), except the `no-espeak`
+   build, which links a sherpa-onnx built without eSpeak NG and is `MIT OR Apache-2.0`
+   (`tools/no-espeak/README.md`): nothing GPL may enter that build, and `build.rs` checks it
+   was given that library. Every copy of it goes with
    `THIRD-PARTY-NOTICES.txt` (`tools/notices.sh`): the crates' licences, and those of the C and
    C++ libraries in sherpa-onnx's prebuilt library, kept in `licences/`, and can lead to their
    source, the `sources-v<n>` release (`tools/sources.sh`). Bumping the sherpa-onnx pin means
