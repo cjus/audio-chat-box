@@ -47,6 +47,7 @@ pub mod hear;
 pub mod listen;
 pub mod models;
 pub mod node;
+pub mod pronounce;
 pub mod speak;
 
 use std::fmt;

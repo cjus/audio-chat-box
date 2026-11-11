@@ -118,6 +118,7 @@ request that needs one it didn't offer is answered `Unsupported`.
 | `listen` | `voice/listen` and its notifications | With `--listen silero-vad` |
 | `hotwords` | `hotwords` in `voice/transcribe` and `voice/listen` | Whenever it hears |
 | `wordTimes` | Each word's start and end, in `voice/speak` | Whenever it speaks and hears |
+| `pronunciations` | How a client says a word is said, in `voice/speak` | Only a build with the `pronunciations` feature, for a sherpa-onnx that reads them (the build without eSpeak NG) |
 | `formats` | The audio formats it reads and writes | `wav` and `pcmF32` |
 
 Audio formats: `wav` is a RIFF WAVE file, mono, with 16-bit integer or 32-bit float samples;
@@ -130,6 +131,15 @@ client's domain. audio-chat-box gives each piece of a hotword a small bonus in i
 search (`HOTWORD_SCORE`, `src/hear.rs`), which pulls ordinary words towards hotwords only
 when the sound allows both. A hotword that is empty or holds a line break, or more than 1000
 of them, is `InvalidParams`; "/" and ":" inside one are read as spaces.
+
+**Pronunciations.** A client that knows how a word sounds, and Kokoro may not (a player's
+name, an opening's), gives it as `pronunciations`: each `word` and its `ipa`, the sounds in the
+International Phonetic Alphabet. The node turns the IPA into Kokoro's own symbols
+(`src/pronounce.rs`: `eɪ` is `A`, `tʃ` is `ʧ`, `r` is `ɹ`) and says the word as given wherever it
+appears in the text. An entry with a sound Kokoro has no symbol for is ignored, so one entry
+never silences a reply; one that is empty or holds a space or a line break, or more than 256 of
+them, is `InvalidParams`. The prebuilt sherpa-onnx can't take them, so the default build does
+not offer the capability and ignores the field.
 
 ## 5. Speaking and hearing
 
@@ -155,6 +165,7 @@ Text to speech. Params:
 | `speed` | number | 1.0 is the voice's own pace |
 | `format` | string | The audio format wanted. Missing: `wav` |
 | `wordTimes` | boolean | Also say when each word is said |
+| `pronunciations` | array | How words in `text` are said: each `word` and its `ipa` ([4](#4-what-it-can-do)). Missing: none |
 
 An unknown voice is `InvalidParams`. The result: `format`, `sampleRate`, `audio` (base64)
 and `durationMs`.

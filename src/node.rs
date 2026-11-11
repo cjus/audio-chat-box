@@ -84,6 +84,7 @@ use crate::align::{self, Piece};
 use crate::hear::{self, Hotwords, Transcriber};
 use crate::listen::{self, Detect, Detector, Event, Utterances};
 use crate::models::{self, LocalModel};
+use crate::pronounce::Pronunciations;
 use crate::speak::{self, DEFAULT_VOICE, SPEEDS, Speaker};
 use crate::{Samples, SpeechError};
 
@@ -102,6 +103,11 @@ pub const LICENSE: &str = "GPL-3.0-or-later";
 
 /// Where its source is.
 pub const SOURCE: &str = "https://github.com/cjus/audio-chat-box";
+
+/// Whether this build says the client's `pronunciations`: only with the `pronunciations`
+/// feature, for a sherpa-onnx that reads them (`src/pronounce.rs`). Otherwise the field is
+/// ignored, as the spec says of a node without the capability.
+pub const PRONUNCIATIONS: bool = cfg!(feature = "pronunciations");
 
 /// How often a download's progress is reported, at most (spec, 8.4: "about once a second").
 pub const PROGRESS_INTERVAL: Duration = Duration::from_secs(1);
@@ -127,13 +133,14 @@ pub struct Config {
 
 /// Reads text aloud: Kokoro's [`Speaker`], or a fake in tests.
 pub trait Speech: Send + Sync {
-    /// Reads `text` in the voice numbered `voice`, at `speed`, stopping at a sentence's end
-    /// once `stop` is set.
+    /// Reads `text` in the voice numbered `voice`, at `speed`, saying the words in
+    /// `pronunciations` as given, stopping at a sentence's end once `stop` is set.
     fn speak(
         &self,
         text: &str,
         voice: usize,
         speed: f32,
+        pronunciations: &Pronunciations,
         stop: &Arc<AtomicBool>,
     ) -> Result<Samples, SpeechError>;
 }
@@ -144,9 +151,10 @@ impl Speech for Speaker {
         text: &str,
         voice: usize,
         speed: f32,
+        pronunciations: &Pronunciations,
         stop: &Arc<AtomicBool>,
     ) -> Result<Samples, SpeechError> {
-        Speaker::speak(self, text, voice, speed, stop)
+        Speaker::speak(self, text, voice, speed, pronunciations, stop)
     }
 }
 
@@ -542,10 +550,14 @@ impl Node {
                     listen: self.listening.is_some() && self.hearing.is_some(),
                     word_times: self.speech.is_some() && self.hearing.is_some(),
                     hotwords: self.hearing.is_some(),
+                    // Live partials arrive with their own change; not offered yet.
+                    partials: false,
+                    pronunciations: PRONUNCIATIONS && self.speech.is_some(),
                     formats: vec![AudioFormat::Wav, AudioFormat::PcmF32],
                 }),
             },
             limits: Limits::default(),
+            resources: None,
         };
         Response::ok::<Initialize>(id, &result)
     }
@@ -615,6 +627,11 @@ impl Node {
         if params.text.trim().is_empty() {
             return Err(invalid("there is no text to read".to_string()));
         }
+        let pronunciations = if PRONUNCIATIONS {
+            Pronunciations::of(&params.pronunciations).map_err(invalid)?
+        } else {
+            Pronunciations::none()
+        };
         let format = params.format.unwrap_or(AudioFormat::Wav);
         let speaker = self
             .speech
@@ -636,7 +653,7 @@ impl Node {
         };
         let (id, text) = (request.id.clone(), params.text);
         self.work(id.clone(), move |job| {
-            match speaker.speak(&text, voice, speed, &job.stop) {
+            match speaker.speak(&text, voice, speed, &pronunciations, &job.stop) {
                 Ok(samples) => {
                     let mut answer = spoken(&samples, format);
                     if let Some(ears) = ears {
@@ -1132,6 +1149,7 @@ mod tests {
             text: &str,
             voice: usize,
             _speed: f32,
+            pronunciations: &Pronunciations,
             stop: &Arc<AtomicBool>,
         ) -> Result<Samples, SpeechError> {
             let deadline = Instant::now() + self.pause;
@@ -1141,8 +1159,9 @@ mod tests {
                 }
                 thread::sleep(Duration::from_millis(1));
             }
-            // One sample for each letter, and the voice's number in the first.
-            let mut samples = vec![0.25; text.len()];
+            // One sample for each letter, and the voice's number in the first; and one more
+            // for each pronunciation it was given, so a test can see they arrived.
+            let mut samples = vec![0.25; text.len() + pronunciations.len()];
             samples[0] = voice as f32 / 100.0;
             Ok(Samples {
                 rate: 24_000,
@@ -1347,6 +1366,75 @@ mod tests {
         let samples = hear::samples_of_pcm_f32(&bytes, raw.sample_rate).unwrap();
         assert_eq!(samples.samples, [0.21, 0.25]);
         assert_eq!(raw.duration_ms, 0, "two samples at 24 kHz");
+    }
+
+    /// Whether a node that speaks says, in `initialize`, that it takes pronunciations.
+    fn offers_pronunciations() -> bool {
+        let written = Written::default();
+        let mut node = Node::new(
+            Arc::new(Mutex::new(Box::new(written.clone()))),
+            Config {
+                speech: Some(models::KOKORO),
+                ..Config::default()
+            },
+        );
+        let params = json!({"protocol": "1.0", "client": {"name": "test", "version": "1"}});
+        node.request(&request(1, "initialize", params));
+        let offered = written.response(1).result::<Initialize>().unwrap();
+        offered.capabilities.voice.unwrap().pronunciations
+    }
+
+    /// Two entries for "Knight to f3.": one the model can say, one it can't (an emoji).
+    fn pronunciations_params() -> serde_json::Value {
+        json!({"text": "Knight to f3.", "format": "pcmF32", "pronunciations": [
+            {"word": "Nimzowitsch", "ipa": "ˈnɪmzoʊˌvɪtʃ"},
+            {"word": "emoji", "ipa": "ˈɪmo🙂"}]})
+    }
+
+    fn spoken_samples(written: &Written, id: i64) -> usize {
+        let said = written.response(id).result::<Speak>().unwrap();
+        let bytes = BASE64.decode(&said.audio).unwrap();
+        hear::samples_of_pcm_f32(&bytes, said.sample_rate)
+            .unwrap()
+            .samples
+            .len()
+    }
+
+    #[cfg(feature = "pronunciations")]
+    #[test]
+    fn with_the_feature_the_clients_pronunciations_are_offered_taken_and_checked() {
+        let (mut node, written) = ready_node(Duration::ZERO);
+        assert!(offers_pronunciations());
+
+        // The entry the model can say reaches it; the one it can't is dropped, not refused.
+        node.request(&request(2, "voice/speak", pronunciations_params()));
+        assert_eq!(spoken_samples(&written, 2), "Knight to f3.".len() + 1);
+
+        for (id, bad) in [
+            (3, json!({"word": "", "ipa": "naɪt"})),
+            (4, json!({"word": "two words", "ipa": "naɪt"})),
+            (5, json!({"word": "knight", "ipa": "na\nɪt"})),
+        ] {
+            let params = json!({"text": "Knight to f3.", "pronunciations": [bad]});
+            node.request(&request(id, "voice/speak", params));
+            let error = written.response(id).outcome.unwrap_err();
+            assert_eq!(error.code, code::INVALID_PARAMS, "{}", error.message);
+        }
+    }
+
+    #[cfg(not(feature = "pronunciations"))]
+    #[test]
+    fn without_the_feature_pronunciations_are_not_offered_and_are_ignored() {
+        let (mut node, written) = ready_node(Duration::ZERO);
+        assert!(!offers_pronunciations());
+
+        // Ignored, as the spec says of a node without the capability: even a malformed entry.
+        node.request(&request(2, "voice/speak", pronunciations_params()));
+        assert_eq!(spoken_samples(&written, 2), "Knight to f3.".len());
+        let bad = json!({"text": "Knight to f3.", "format": "pcmF32",
+            "pronunciations": [{"word": "", "ipa": ""}]});
+        node.request(&request(3, "voice/speak", bad));
+        assert!(written.response(3).result::<Speak>().is_ok());
     }
 
     #[test]

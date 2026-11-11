@@ -7,6 +7,7 @@ use std::time::Instant;
 
 use audio_chat_box::hear::Transcriber;
 use audio_chat_box::models::MODELS;
+use audio_chat_box::pronounce::Pronunciations;
 use audio_chat_box::speak::{Speaker, THREADS, voice_number};
 
 fn main() {
@@ -28,7 +29,9 @@ fn main() {
         .filter(|s| !s.is_empty())
     {
         let t = Instant::now();
-        let speech = speaker.speak(sentence, voice, 1.0, &stop).unwrap();
+        let speech = speaker
+            .speak(sentence, voice, 1.0, &Pronunciations::none(), &stop)
+            .unwrap();
         let made = t.elapsed().as_secs_f32();
         let audio = speech.samples.len() as f32 / speech.rate as f32;
         let t = Instant::now();

@@ -39,6 +39,7 @@
 //!
 //! Kokoro (Apache-2.0): <https://huggingface.co/hexgrad/Kokoro-82M>.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -50,6 +51,7 @@ use sherpa_onnx::{
 };
 
 use crate::models::LocalModel;
+use crate::pronounce::Pronunciations;
 use crate::{Samples, SpeechError};
 
 /// The voice a request without one is read in, the first that [`voices`] lists: Solrac's
@@ -253,6 +255,7 @@ impl Speaker {
         text: &str,
         voice: usize,
         speed: f32,
+        pronunciations: &Pronunciations,
         stop: &Arc<AtomicBool>,
     ) -> Result<Samples, SpeechError> {
         let _reading = self.reading.lock().unwrap_or_else(PoisonError::into_inner);
@@ -260,9 +263,18 @@ impl Speaker {
             return Err(SpeechError::Stopped);
         }
         let text = text.replace('\0', " ");
+        // The client's pronunciations go with this request alone (`src/pronounce.rs`); a
+        // sherpa-onnx that doesn't read the key ignores it.
+        let extra = (!pronunciations.is_empty()).then(|| {
+            HashMap::from([(
+                "pronunciations".to_string(),
+                serde_json::Value::String(pronunciations.lexicon_lines()),
+            )])
+        });
         let config = GenerationConfig {
             sid: i32::try_from(voice).unwrap_or(0),
             speed,
+            extra,
             ..GenerationConfig::default()
         };
         let go_on = {
