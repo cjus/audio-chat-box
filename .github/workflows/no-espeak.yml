@@ -1,0 +1,74 @@
+# Builds the permissive flavour (no eSpeak NG, tools/no-espeak/README.md) from source on Linux
+# and Windows, and tests it. macOS is checked by hand. It runs only on a ready pull request
+# that changes the patch, the script, this file or the feature's code, and by hand: the
+# library takes a while to build, and Windows minutes count double (cjus/chessgui#73).
+name: No eSpeak
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - tools/no-espeak/**
+      - tools/build-sherpa-no-espeak.sh
+      - .github/workflows/no-espeak.yml
+      - build.rs
+      - Cargo.toml
+      - src/pronounce.rs
+  workflow_dispatch:
+
+concurrency:
+  group: no-espeak-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+      - name: Visual Studio developer environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1.13.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build sherpa-onnx from source, patched
+        run: tools/build-sherpa-no-espeak.sh "$RUNNER_TEMP/sherpa-no-espeak"
+      # Git Bash's coreutils `link` comes before MSVC's link.exe on the PATH, and rustc would
+      # run it instead.
+      - name: Let rustc find MSVC's linker
+        if: runner.os == 'Windows'
+        run: rm -f /usr/bin/link
+      - name: Build and test the no-espeak program
+        env:
+          SHERPA_ONNX_LIB_DIR: ${{ runner.temp }}/sherpa-no-espeak/lib
+        run: |
+          cargo build --release --locked --features no-espeak
+          cargo test --locked --features no-espeak
+      # The stand-in piper-phonemize library defines a stub `espeak_Initialize`, so look for
+      # what only the real eSpeak NG holds: its `espeak_ng_Initialize` (the usual build has it, this one doesn't).
+      - name: The program holds no eSpeak NG
+        run: |
+          bin=target/release/audio-chat-box
+          [ -f "$bin.exe" ] && bin="$bin.exe"
+          if grep -qa espeak_ng_Initialize "$bin"; then
+            echo "$bin contains eSpeak NG's espeak_ng_Initialize" >&2
+            exit 1
+          fi
+          echo "no eSpeak NG in $bin"
