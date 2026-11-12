@@ -16,7 +16,7 @@ index 03ed01e..a5a9967 100644
  
  if(SHERPA_ONNX_ENABLE_SPEAKER_DIARIZATION)
 diff --git a/sherpa-onnx/csrc/kokoro-multi-lang-lexicon.cc b/sherpa-onnx/csrc/kokoro-multi-lang-lexicon.cc
-index 9df90ca..4658689 100644
+index 9df90ca..e13cebf 100644
 --- a/sherpa-onnx/csrc/kokoro-multi-lang-lexicon.cc
 +++ b/sherpa-onnx/csrc/kokoro-multi-lang-lexicon.cc
 @@ -38,6 +38,12 @@ void CallPhonemizeEspeak(const std::string &text,
@@ -179,12 +179,12 @@ index 9df90ca..4658689 100644
 -            }
 -          }
 +        if (!InflectedIds(word, &ids) && !NumberIds(word, &ids) &&
-+            !CompoundIds(word, &ids)) {
++            !SquareIds(word, &ids) && !CompoundIds(word, &ids)) {
 +          SHERPA_ONNX_LOGE("OOV skipped: '%s'", word.c_str());
          }
  
          if (this_sentence.size() + ids.size() + 3 > max_len - 2) {
-@@ -426,6 +474,220 @@ class KokoroMultiLangLexicon::Impl {
+@@ -426,6 +474,252 @@ class KokoroMultiLangLexicon::Impl {
      return ans;
    }
  
@@ -272,6 +272,38 @@ index 9df90ca..4658689 100644
 +    }
 +    *ids = std::move(out);
 +    return !ids->empty();
++  }
++
++  // A square or a short code written as one token ("f3", "e6", "qb6", "mp3"): one or two
++  // letters, said by their names, then a number of one or two digits. eSpeak read them
++  // this way; "a" is the letter, not the article.
++  bool SquareIds(const std::string &word, std::vector<int32_t> *ids) const {
++    size_t l = 0;
++    while (l < word.size() && word[l] >= 'a' && word[l] <= 'z') ++l;
++    if (l == 0 || l > 2 || word.size() - l == 0 || word.size() - l > 2) return false;
++    std::vector<int32_t> out;
++    auto space = token2id_.find(" ");
++    if (space == token2id_.end()) return false;
++    for (size_t i = 0; i < l; ++i) {
++      std::vector<int32_t> letter;
++      if (word[i] == 'a') {
++        auto a = token2id_.find("A");  // Kokoro's symbol for the vowel of "day"
++        if (a == token2id_.end()) return false;
++        letter = {a->second};
++      } else {
++        const std::vector<int32_t> *found = Lookup(std::string(1, word[i]));
++        if (found == nullptr) return false;
++        letter = *found;
++      }
++      if (!out.empty()) out.push_back(space->second);
++      out.insert(out.end(), letter.begin(), letter.end());
++    }
++    std::vector<int32_t> number;
++    if (!NumberIds(word.substr(l), &number)) return false;
++    out.push_back(space->second);
++    out.insert(out.end(), number.begin(), number.end());
++    *ids = std::move(out);
++    return true;
 +  }
 +
 +  // A compound the lexicon lacks ("middlegame", "grandmasters"): two words it has, each of
@@ -405,7 +437,7 @@ index 9df90ca..4658689 100644
    void InitTokens(const std::string &tokens) {
      auto is = OpenInputFile(tokens);
      InitTokens(is);
-@@ -571,6 +833,12 @@ KokoroMultiLangLexicon::KokoroMultiLangLexicon(
+@@ -571,6 +865,12 @@ KokoroMultiLangLexicon::KokoroMultiLangLexicon(
      : impl_(std::make_unique<Impl>(mgr, tokens, lexicon, data_dir, meta_data,
                                     debug)) {}  // NOLINT
  
