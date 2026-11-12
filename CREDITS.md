@@ -3,6 +3,15 @@
 The models `audio-chat-box` downloads, and the code it links. (They moved here from Solrac's
 `assets/CREDITS.md` with the voice, cjus/chessgui#98, step 6.)
 
+## The build without eSpeak NG
+
+The tables below describe the usual build. The build with `--features no-espeak`
+(`tools/no-espeak/README.md`, `MIT OR Apache-2.0` as a whole, the Mac App Store's) differs in
+two ways: sherpa-onnx is built from source with a patch, and links neither eSpeak NG nor
+piper-phonemize (nothing GPL), and it downloads the Kokoro archives with a `-no-espeak` suffix,
+which hold no `espeak-ng-data/`. Everything else below applies to it, Parakeet's CC-BY-4.0
+attribution included.
+
 ## Downloaded when needed
 
 It downloads its models the first time it needs them, from this repository's `models-v1`
