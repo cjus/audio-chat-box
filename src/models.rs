@@ -98,31 +98,66 @@ pub struct LocalModel {
     pub model_file: &'static str,
 }
 
-/// Kokoro v1.0 at full precision: a 350 MB download. The default: on the M1 Max it measured
+/// Kokoro v1.0 at full precision: a 350 MB download. With the `no-espeak` feature, the archive
+/// without `espeak-ng-data/` that `tools/pack-kokoro-no-espeak.sh` makes (343 MB), which the
+/// patched sherpa-onnx doesn't need. The default: on the M1 Max it measured
 /// about three times faster than the 8-bit model.
 pub const KOKORO: LocalModel = LocalModel {
     id: "kokoro",
     name: "Kokoro 82M",
     purpose: ModelPurpose::Speak,
     license: "Apache-2.0",
-    archive: "kokoro-multi-lang-v1_0.tar.bz2",
-    archive_bytes: 349_906_910,
-    sha256: "c5f7e2d2caf082bc1d20fb70334a61d99d20b484500aad32e7cf84c128ea3298",
-    folder: "kokoro-multi-lang-v1_0",
+    archive: if cfg!(feature = "no-espeak") {
+        "kokoro-multi-lang-v1_0-no-espeak.tar.bz2"
+    } else {
+        "kokoro-multi-lang-v1_0.tar.bz2"
+    },
+    archive_bytes: if cfg!(feature = "no-espeak") {
+        342_606_766
+    } else {
+        349_906_910
+    },
+    sha256: if cfg!(feature = "no-espeak") {
+        "43e72bfdb4c205bc9785870b89d67115ba9cda96ba35e5d15e285f8949c94cd7"
+    } else {
+        "c5f7e2d2caf082bc1d20fb70334a61d99d20b484500aad32e7cf84c128ea3298"
+    },
+    folder: if cfg!(feature = "no-espeak") {
+        "kokoro-multi-lang-v1_0-no-espeak"
+    } else {
+        "kokoro-multi-lang-v1_0"
+    },
     model_file: "model.onnx",
 };
 
 /// Kokoro v1.0 with its weights quantised to 8-bit integers: a 132 MB download, kept for
-/// CPUs where it may be faster.
+/// CPUs where it may be faster. With the `no-espeak` feature, the archive without
+/// `espeak-ng-data/` (125 MB), as for [`KOKORO`].
 pub const KOKORO_INT8: LocalModel = LocalModel {
     id: "kokoro-int8",
     name: "Kokoro 82M, 8-bit",
     purpose: ModelPurpose::Speak,
     license: "Apache-2.0",
-    archive: "kokoro-int8-multi-lang-v1_0.tar.bz2",
-    archive_bytes: 132_303_094,
-    sha256: "4c3052abaa60943a341f193888cf6abd68787dae6ab8ae5c925a706caa247e4e",
-    folder: "kokoro-int8-multi-lang-v1_0",
+    archive: if cfg!(feature = "no-espeak") {
+        "kokoro-int8-multi-lang-v1_0-no-espeak.tar.bz2"
+    } else {
+        "kokoro-int8-multi-lang-v1_0.tar.bz2"
+    },
+    archive_bytes: if cfg!(feature = "no-espeak") {
+        125_008_538
+    } else {
+        132_303_094
+    },
+    sha256: if cfg!(feature = "no-espeak") {
+        "c843a28f95ee2429f09d9a207c9e284cc89f1a7c54800dc8cc5bb17c90cbfb21"
+    } else {
+        "4c3052abaa60943a341f193888cf6abd68787dae6ab8ae5c925a706caa247e4e"
+    },
+    folder: if cfg!(feature = "no-espeak") {
+        "kokoro-int8-multi-lang-v1_0-no-espeak"
+    } else {
+        "kokoro-int8-multi-lang-v1_0"
+    },
     model_file: "model.int8.onnx",
 };
 

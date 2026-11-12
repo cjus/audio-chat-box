@@ -35,6 +35,16 @@ The patched library is not shipped with the usual build, and the model's lexicon
 sherpa-onnx's own, at the versions in `licences/README.md`, minus `espeak-ng` and
 `piper-phonemize`.
 
+## The model archive
+
+The usual Kokoro archive holds `espeak-ng-data/` (GPL-3.0-or-later). The `no-espeak` build
+downloads another one, `kokoro-multi-lang-v1_0-no-espeak.tar.bz2` (and an int8 one), which is
+sherpa-onnx's archive with that folder left out and the folder renamed to match
+(`tools/pack-kokoro-no-espeak.sh`, which checks its inputs by SHA-256). `src/models.rs` names
+them, with their sizes and checksums, only with the feature, and the Kokoro config no longer
+asks for the data folder (`src/speak.rs`). The archives are in the `models-v1` release, and
+a product with its own copy of the models (Solrac's) puts them there too.
+
 ## Why it can't be mistaken for the usual build
 
 `sherpa-onnx-sys` links `espeak-ng` and `ucd` by name, so the script puts two empty archives

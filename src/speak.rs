@@ -195,7 +195,9 @@ const VOICES_FILE: &str = "voices.bin";
 /// The model's phoneme symbols.
 const TOKENS_FILE: &str = "tokens.txt";
 
-/// eSpeak NG's pronunciation data.
+/// eSpeak NG's pronunciation data. The `no-espeak` build has no eSpeak NG, and its archives
+/// (`tools/pack-kokoro-no-espeak.sh`) hold none.
+#[cfg(not(feature = "no-espeak"))]
 const ESPEAK_DATA: &str = "espeak-ng-data";
 
 /// Reads text aloud with Kokoro, in any of its voices.
@@ -231,6 +233,7 @@ impl Speaker {
                     model: Some(file(model.model_file)?),
                     voices: Some(file(VOICES_FILE)?),
                     tokens: Some(file(TOKENS_FILE)?),
+                    #[cfg(not(feature = "no-espeak"))]
                     data_dir: Some(file(ESPEAK_DATA)?),
                     lexicon: Some(file(LEXICON)?),
                     ..OfflineTtsKokoroModelConfig::default()
