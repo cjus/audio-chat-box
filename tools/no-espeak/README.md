@@ -20,6 +20,9 @@ Carlos Justiniano and Claude in November 2026, as Apache-2.0 section 4(b) asks u
   (`kokoro-multi-lang-lexicon.cc`) no longer sounds out words with eSpeak: a word the
   lexicon lacks gets its inflection rules (plural -s, -ed, -ing, -ly, -er, rewritten from
   the idea in misaki, Apache-2.0), or is skipped. "the" and "a" take their weak forms.
+  Numbers ("4", "1972", "1990s", "2nd") are said as English words (a year as a year), since
+  eSpeak read digits and Solrac says each move's rank as one; a compound the lexicon lacks
+  ("middlegame") is two words it has.
   The model's config no longer needs `espeak-ng-data` (`offline-tts-kokoro-model-config.cc`).
 - **Pronunciations per request.** A generation config's `extra["pronunciations"]` holds
   lexicon lines ("word sym sym ...") that win over the lexicon's for that request
