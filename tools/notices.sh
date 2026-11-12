@@ -40,6 +40,16 @@ mkdir -p "$out"
 cargo about generate --locked -c tools/notices/about.toml -o "$crates" tools/notices/notices.hbs
 cargo about generate --locked -c tools/notices/about.toml -o "$folders" tools/notices/crates.hbs
 
+# The notices' opening says the program is GPL because it links eSpeak NG; the build without it
+# (tools/no-espeak/README.md) isn't, so its notices say what is true of it.
+if [[ -n "${NO_ESPEAK:-}" ]]; then
+    perl -0pi -e 's/The program as built links\neSpeak NG \(GPL-3\.0-or-later\) through sherpa-onnx.s library, so the program as a whole is under\nthe GNU General Public License 3\.0 or later \(LICENSE-GPL-3\.0\), and its source is at\nhttps:\/\/github\.com\/cjus\/audio-chat-box\./The program as built here links no eSpeak NG (the build without it, tools\/no-espeak\/README.md),\nso the program as a whole is under the same two licences. Its source is at\nhttps:\/\/github.com\/cjus\/audio-chat-box./' "$crates"
+    if grep -q "GPL" "$crates" && grep -q "LICENSE-GPL-3.0" "$crates"; then
+        echo "NO_ESPEAK: the notices' opening still says GPL-3.0; tools/notices/notices.hbs changed" >&2
+        exit 1
+    fi
+fi
+
 rule="--------------------------------------------------------------------------------"
 {
     cat "$crates"
