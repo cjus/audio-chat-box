@@ -50,6 +50,11 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build sherpa-onnx from source, patched
         run: tools/build-sherpa-no-espeak.sh "$RUNNER_TEMP/sherpa-no-espeak"
+      # Git Bash's coreutils `link` comes before MSVC's link.exe on the PATH, and rustc would
+      # run it instead.
+      - name: Let rustc find MSVC's linker
+        if: runner.os == 'Windows'
+        run: rm -f /usr/bin/link
       - name: Build and test the no-espeak program
         env:
           SHERPA_ONNX_LIB_DIR: ${{ runner.temp }}/sherpa-no-espeak/lib
