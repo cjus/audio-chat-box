@@ -16,7 +16,7 @@ index 03ed01e..a5a9967 100644
  
  if(SHERPA_ONNX_ENABLE_SPEAKER_DIARIZATION)
 diff --git a/sherpa-onnx/csrc/kokoro-multi-lang-lexicon.cc b/sherpa-onnx/csrc/kokoro-multi-lang-lexicon.cc
-index 9df90ca..3bb797d 100644
+index 9df90ca..4658689 100644
 --- a/sherpa-onnx/csrc/kokoro-multi-lang-lexicon.cc
 +++ b/sherpa-onnx/csrc/kokoro-multi-lang-lexicon.cc
 @@ -38,6 +38,12 @@ void CallPhonemizeEspeak(const std::string &text,
@@ -150,7 +150,7 @@ index 9df90ca..3bb797d 100644
          if (this_sentence.size() + ids.size() + 3 > max_len - 2) {
            this_sentence.push_back(0);
            ans.push_back(std::move(this_sentence));
-@@ -367,29 +433,10 @@ class KokoroMultiLangLexicon::Impl {
+@@ -367,29 +433,11 @@ class KokoroMultiLangLexicon::Impl {
                             word.c_str());
          }
  
@@ -178,15 +178,127 @@ index 9df90ca..3bb797d 100644
 -              }
 -            }
 -          }
-+        if (!InflectedIds(word, &ids)) {
++        if (!InflectedIds(word, &ids) && !NumberIds(word, &ids) &&
++            !CompoundIds(word, &ids)) {
 +          SHERPA_ONNX_LOGE("OOV skipped: '%s'", word.c_str());
          }
  
          if (this_sentence.size() + ids.size() + 3 > max_len - 2) {
-@@ -426,6 +473,109 @@ class KokoroMultiLangLexicon::Impl {
+@@ -426,6 +474,220 @@ class KokoroMultiLangLexicon::Impl {
      return ans;
    }
  
++
++  // (Patched.) English words for a number, below a billion: "forty two", "nineteen
++  // seventy two" for a year, with `ordinal` ("forty second") or `decade` ("nineties").
++  static void NumberWords(uint64_t n, std::vector<std::string> *out) {
++    static const char *ones[] = {"zero", "one", "two", "three", "four", "five", "six",
++        "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen",
++        "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"};
++    static const char *tens[] = {"", "", "twenty", "thirty", "forty", "fifty", "sixty",
++        "seventy", "eighty", "ninety"};
++    if (n >= 1000000) {
++      NumberWords(n / 1000000, out);
++      out->push_back("million");
++      if (n % 1000000) NumberWords(n % 1000000, out);
++    } else if (n >= 1000) {
++      NumberWords(n / 1000, out);
++      out->push_back("thousand");
++      if (n % 1000) NumberWords(n % 1000, out);
++    } else if (n >= 100) {
++      NumberWords(n / 100, out);
++      out->push_back("hundred");
++      if (n % 100) NumberWords(n % 100, out);
++    } else if (n >= 20) {
++      out->push_back(tens[n / 10]);
++      if (n % 10) out->push_back(ones[n % 10]);
++    } else {
++      out->push_back(ones[n]);
++    }
++  }
++
++  static std::string OrdinalWord(const std::string &w) {
++    static const std::unordered_map<std::string, std::string> irregular = {
++        {"one", "first"}, {"two", "second"}, {"three", "third"}, {"five", "fifth"},
++        {"eight", "eighth"}, {"nine", "ninth"}, {"twelve", "twelfth"}};
++    auto it = irregular.find(w);
++    if (it != irregular.end()) return it->second;
++    if (!w.empty() && w.back() == 'y') return w.substr(0, w.size() - 1) + "ieth";
++    return w + "th";
++  }
++
++  // A word that is a number ("4", "1972", "1990s", "2nd", "27th"): said as English
++  // words. A year is four digits from 1100 to 1999 or 2010 to 2099.
++  bool NumberIds(const std::string &word, std::vector<int32_t> *ids) const {
++    size_t d = 0;
++    while (d < word.size() && word[d] >= '0' && word[d] <= '9') ++d;
++    if (d == 0 || d > 9) return false;
++    std::string suffix = word.substr(d);
++    if (!suffix.empty() && suffix != "s" && suffix != "st" && suffix != "nd" &&
++        suffix != "rd" && suffix != "th") {
++      return false;
++    }
++    uint64_t n = std::stoull(word.substr(0, d));
++    std::vector<std::string> words;
++    if (d == 4 && ((n >= 1100 && n <= 1999) || (n >= 2010 && n <= 2099))) {
++      NumberWords(n / 100, &words);
++      uint64_t lo = n % 100;
++      if (lo == 0) {
++        words.push_back("hundred");
++      } else {
++        if (lo < 10) words.push_back("oh");
++        NumberWords(lo, &words);
++      }
++    } else {
++      NumberWords(n, &words);
++    }
++    if (suffix == "s") {
++      std::string &w = words.back();
++      w = (w.back() == 'y') ? w.substr(0, w.size() - 1) + "ies" : w + "s";
++    } else if (!suffix.empty()) {
++      words.back() = OrdinalWord(words.back());
++    }
++    std::vector<int32_t> out;
++    auto space = token2id_.find(" ");
++    for (const auto &w : words) {
++      const std::vector<int32_t> *found = Lookup(w);
++      std::vector<int32_t> inflected;
++      if (found == nullptr) {
++        if (!InflectedIds(w, &inflected)) return false;
++        found = &inflected;
++      }
++      if (!out.empty() && space != token2id_.end()) out.push_back(space->second);
++      out.insert(out.end(), found->begin(), found->end());
++    }
++    *ids = std::move(out);
++    return !ids->empty();
++  }
++
++  // A compound the lexicon lacks ("middlegame", "grandmasters"): two words it has, each of
++  // three letters or more, the first as long as it can be.
++  bool CompoundIds(const std::string &word, std::vector<int32_t> *ids) const {
++    if (word.size() < 6) return false;
++    for (char c : word) {
++      if (c < 'a' || c > 'z') return false;
++    }
++    for (size_t p = word.size() - 3; p >= 3; --p) {
++      const std::vector<int32_t> *a = Lookup(word.substr(0, p));
++      if (a == nullptr) continue;
++      std::string rest = word.substr(p);
++      const std::vector<int32_t> *b = Lookup(rest);
++      std::vector<int32_t> inflected;
++      if (b == nullptr) {
++        if (!InflectedIds(rest, &inflected)) continue;
++        b = &inflected;
++      }
++      std::vector<int32_t> out(a->begin(), a->end());
++      out.insert(out.end(), b->begin(), b->end());
++      *ids = std::move(out);
++      return true;
++    }
++    return false;
++  }
++
 +
 +  // (Patched, no eSpeak NG.) Pronounces an inflected word the lexicon lacks, from the lexicon's
 +  // entry for its stem: "suggests" from "suggest", "stopped" from "stop", "castling's" from
@@ -293,7 +405,7 @@ index 9df90ca..3bb797d 100644
    void InitTokens(const std::string &tokens) {
      auto is = OpenInputFile(tokens);
      InitTokens(is);
-@@ -571,6 +721,12 @@ KokoroMultiLangLexicon::KokoroMultiLangLexicon(
+@@ -571,6 +833,12 @@ KokoroMultiLangLexicon::KokoroMultiLangLexicon(
      : impl_(std::make_unique<Impl>(mgr, tokens, lexicon, data_dir, meta_data,
                                     debug)) {}  // NOLINT
  
