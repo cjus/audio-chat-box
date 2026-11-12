@@ -44,6 +44,9 @@ cnp-conformance = { git = "https://github.com/cjus/chess-node-protocol", rev = "
 # patched build without eSpeak NG, `SHERPA_ONNX_LIB_DIR`) says them, so it is off by default;
 # the prebuilt library ignores the key. See `src/pronounce.rs`.
 pronunciations = []
+# The program without eSpeak NG: needs sherpa-onnx built by tools/build-sherpa-no-espeak.sh
+# (build.rs checks), and is `MIT OR Apache-2.0` as a whole (tools/no-espeak/README.md).
+no-espeak = ["pronunciations"]
 
 [lints.rust]
 missing_docs = "deny"

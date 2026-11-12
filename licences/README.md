@@ -7,7 +7,9 @@ each taken from the project's source at the version sherpa-onnx 1.13.8's CMake f
 (`cmake/*.cmake` at its tag `v1.13.8`, and kaldi-decoder's at `v0.3.0`). `tools/notices.sh`
 puts them all in `THIRD-PARTY-NOTICES.txt`, after the crates'.
 
-eSpeak NG makes the program as a whole GPL-3.0-or-later (`LICENSE-GPL-3.0`, the README's
+The build without eSpeak NG (`tools/no-espeak/README.md`) links neither `espeak-ng` nor
+`piper-phonemize`, and `NO_ESPEAK=1 tools/notices.sh` leaves them out of its notices.
+eSpeak NG makes the usual program as a whole GPL-3.0-or-later (`LICENSE-GPL-3.0`, the README's
 "Licence"). Every other library here has a licence the GPL allows alongside it.
 
 | Folder | Library (static library in the archive) | Version | Source | Licence |

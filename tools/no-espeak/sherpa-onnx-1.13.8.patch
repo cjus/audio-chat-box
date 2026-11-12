@@ -1,0 +1,454 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 03ed01e..a5a9967 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -567,10 +567,8 @@ endif()
+ include(json)
+ 
+ if(SHERPA_ONNX_ENABLE_TTS)
+-  include(espeak-ng-for-piper)
+-  set(ESPEAK_NG_DIR ${espeak_ng_SOURCE_DIR})
+-  message(STATUS "ESPEAK_NG_DIR: ${ESPEAK_NG_DIR}")
+-  include(piper-phonemize)
++  # No eSpeak NG (GPL) in this build: a stand-in `piper_phonemize` library (stub-piper/).
++  add_subdirectory(${CMAKE_SOURCE_DIR}/stub-piper ${CMAKE_BINARY_DIR}/stub-piper)
+ endif()
+ 
+ if(SHERPA_ONNX_ENABLE_SPEAKER_DIARIZATION)
+diff --git a/sherpa-onnx/csrc/kokoro-multi-lang-lexicon.cc b/sherpa-onnx/csrc/kokoro-multi-lang-lexicon.cc
+index 9df90ca..3bb797d 100644
+--- a/sherpa-onnx/csrc/kokoro-multi-lang-lexicon.cc
++++ b/sherpa-onnx/csrc/kokoro-multi-lang-lexicon.cc
+@@ -38,6 +38,12 @@ void CallPhonemizeEspeak(const std::string &text,
+                          piper::eSpeakPhonemeConfig &config,  // NOLINT
+                          std::vector<std::vector<piper::Phoneme>> *phonemes);
+ 
++// (Patched.) Pronunciations that come with one request: word -> token IDs. A thread-local
++// pointer, set only while that request's text is converted, so the lexicon itself stays
++// const and shared between threads.
++using RequestLexicon = std::unordered_map<std::string, std::vector<int32_t>>;
++thread_local const RequestLexicon *g_request_lexicon = nullptr;
++
+ class KokoroMultiLangLexicon::Impl {
+  public:
+   Impl(const std::string &tokens, const std::string &lexicon,
+@@ -48,7 +54,6 @@ class KokoroMultiLangLexicon::Impl {
+ 
+     InitLexicon(lexicon);
+ 
+-    InitEspeak(data_dir);  // See ./piper-phonemize-lexicon.cc
+   }
+ 
+   template <typename Manager>
+@@ -62,7 +67,6 @@ class KokoroMultiLangLexicon::Impl {
+ 
+     // we assume you have copied data_dir from assets to some path
+ 
+-    InitEspeak(data_dir);  // See ./piper-phonemize-lexicon.cc
+   }
+ 
+   std::vector<TokenIDs> ConvertTextToTokenIds(const std::string &_text,
+@@ -174,6 +178,49 @@ class KokoroMultiLangLexicon::Impl {
+     return false;
+   }
+ 
++  // The IDs for a word: this request's own pronunciation first, then the lexicon's.
++  const std::vector<int32_t> *Lookup(const std::string &word) const {
++    if (g_request_lexicon != nullptr) {
++      auto r = g_request_lexicon->find(word);
++      if (r != g_request_lexicon->end()) return &r->second;
++    }
++    auto it = word2ids_.find(word);
++    return it == word2ids_.end() ? nullptr : &it->second;
++  }
++
++  // Lexicon lines ("word sym sym ...", as in lexicon files) -> a request lexicon. A line
++  // with a symbol Kokoro lacks, or no word, is skipped.
++  RequestLexicon ParseRequestLexicon(const std::string &lines) const {
++    RequestLexicon out;
++    std::istringstream is(lines);
++    std::string line;
++    while (std::getline(is, line)) {
++      std::istringstream iss(line);
++      std::string word, token;
++      if (!(iss >> word)) continue;
++      ToLowerCase(&word);
++      std::vector<std::string> token_list;
++      while (iss >> token) token_list.push_back(std::move(token));
++      std::vector<int32_t> ids = ConvertTokensToIds(token2id_, token_list);
++      if (ids.empty()) continue;
++      out[std::move(word)] = std::move(ids);
++    }
++    return out;
++  }
++
++ public:
++  std::vector<TokenIDs> ConvertTextToTokenIdsWith(const std::string &text,
++                                                  const std::string &voice,
++                                                  const std::string &lines) const {
++    RequestLexicon request = ParseRequestLexicon(lines);
++    const RequestLexicon *previous = g_request_lexicon;
++    g_request_lexicon = &request;
++    auto ans = ConvertTextToTokenIds(text, voice);
++    g_request_lexicon = previous;
++    return ans;
++  }
++
++ private:
+   std::vector<int32_t> ConvertWordToIds(const std::string &w) const {
+     std::vector<int32_t> ans;
+     if (word2ids_.count(w)) {
+@@ -300,9 +347,7 @@ class KokoroMultiLangLexicon::Impl {
+       return {std::vector<int32_t>{0, token2id_.at(text), 0}};
+     }
+ 
+-    if (!voice.empty()) {
+-      return ConvertTextToTokenIDsWithEspeak(text, voice);
+-    }
++    // (Patched: the lexicon handles every word; no eSpeak NG here.)
+ 
+     // If voice is empty, we split the text into words and use the lexicon
+     // to lookup the pronunciation of each word, fallback to espeak if
+@@ -328,7 +373,8 @@ class KokoroMultiLangLexicon::Impl {
+ 
+     this_sentence.push_back(0);
+ 
+-    for (const auto &_word : words) {
++    for (size_t word_index = 0; word_index < words.size(); ++word_index) {
++      const auto &_word = words[word_index];
+       auto word = ToLowerCase(_word);
+       if (IsPunctuation(word)) {
+         this_sentence.push_back(token2id_.at(word));
+@@ -350,8 +396,28 @@ class KokoroMultiLangLexicon::Impl {
+ 
+           this_sentence.push_back(0);
+         }
+-      } else if (word2ids_.count(word)) {
+-        const auto &ids = word2ids_.at(word);
++      } else if (Lookup(word) != nullptr) {
++        std::vector<int32_t> ids = *Lookup(word);
++        // (Patched.) The lexicon holds the stressed forms of "the" (thee) and "a" (ay); in
++        // running speech they are weak: "the" is thuh before a consonant sound and thee before
++        // a vowel sound, and "a" is a schwa. The vowel test looks at the next word's first
++        // letter, which is wrong for words like "hour" or "unit"; good enough for a fallback.
++        if (word == "the" || word == "a") {
++          auto weak = token2id_.find("ə");
++          auto dh = token2id_.find("ð");
++          bool next_vowel = false;
++          if (word_index + 1 < words.size() && !words[word_index + 1].empty()) {
++            next_vowel = std::string("aeiouAEIOU").find(words[word_index + 1][0]) !=
++                         std::string::npos;
++          }
++          if (weak != token2id_.end() && dh != token2id_.end()) {
++            if (word == "a") {
++              ids = {weak->second};
++            } else if (!next_vowel) {
++              ids = {dh->second, weak->second};
++            }
++          }
++        }
+         if (this_sentence.size() + ids.size() + 3 > max_len - 2) {
+           this_sentence.push_back(0);
+           ans.push_back(std::move(this_sentence));
+@@ -367,29 +433,10 @@ class KokoroMultiLangLexicon::Impl {
+                            word.c_str());
+         }
+ 
+-        piper::eSpeakPhonemeConfig config;
+-
+-        config.voice = meta_data_.voice;
+-
+-        std::vector<std::vector<piper::Phoneme>> phonemes;
+-
+-        CallPhonemizeEspeak(word, config, &phonemes);
+-        // Note phonemes[i] contains a vector of unicode codepoints;
+-        // we need to convert them to utf8
+-
++        // (Patched: no eSpeak NG. A word the lexicon lacks is skipped and reported.)
+         std::vector<int32_t> ids;
+-        for (const auto &v : phonemes) {
+-          for (const auto p : v) {
+-            auto token = Utf32ToUtf8(p);
+-            if (token2id_.count(token)) {
+-              ids.push_back(token2id_.at(token));
+-            } else {
+-              if (debug_) {
+-                SHERPA_ONNX_LOGE("Skip OOV token '%s' from '%s'", token.c_str(),
+-                                 word.c_str());
+-              }
+-            }
+-          }
++        if (!InflectedIds(word, &ids)) {
++          SHERPA_ONNX_LOGE("OOV skipped: '%s'", word.c_str());
+         }
+ 
+         if (this_sentence.size() + ids.size() + 3 > max_len - 2) {
+@@ -426,6 +473,109 @@ class KokoroMultiLangLexicon::Impl {
+     return ans;
+   }
+ 
++
++  // (Patched, no eSpeak NG.) Pronounces an inflected word the lexicon lacks, from the lexicon's
++  // entry for its stem: "suggests" from "suggest", "stopped" from "stop", "castling's" from
++  // "castling". The suffix's sound depends on the stem's last sound, as in English
++  // generally (cats /s/, dogs /z/, boxes /iz/; walked /t/, jogged /d/, wanted /id/). The idea
++  // follows misaki's English G2P (hexgrad/misaki, Apache-2.0); this is a rewrite for sherpa-onnx's
++  // token ids, not a copy of its code.
++  bool InflectedIds(const std::string &word, std::vector<int32_t> *ids) const {
++    std::unordered_map<int32_t, std::string> id2token;
++    for (const auto &[tok, id] : token2id_) {
++      id2token[id] = tok;
++    }
++
++    auto ends = [&](const std::string &suffix) {
++      return word.size() > suffix.size() + 1 &&
++             word.compare(word.size() - suffix.size(), suffix.size(), suffix) ==
++                 0;
++    };
++    auto chop = [&](size_t n) { return word.substr(0, word.size() - n); };
++    auto undoubled = [](const std::string &stem) {
++      size_t n = stem.size();
++      return n > 2 && stem[n - 1] == stem[n - 2] ? stem.substr(0, n - 1) : stem;
++    };
++
++    // (stem to look up, kind of suffix): s plural or possessive, d past, g -ing, l -ly, r -er
++    std::vector<std::pair<std::string, char>> tries;
++    if (ends("'s")) tries.push_back({chop(2), 's'});
++    if (ends("s'")) tries.push_back({chop(1), '0'});
++    if (ends("ies")) tries.push_back({chop(3) + "y", 's'});
++    if (ends("es")) tries.push_back({chop(2), 's'});
++    if (ends("s") && !ends("ss") && !ends("'s")) tries.push_back({chop(1), 's'});
++    if (ends("ied")) tries.push_back({chop(3) + "y", 'd'});
++    if (ends("ed")) {
++      tries.push_back({chop(2), 'd'});
++      tries.push_back({chop(1), 'd'});
++      tries.push_back({undoubled(chop(2)), 'd'});
++    }
++    if (ends("ing")) {
++      tries.push_back({chop(3), 'g'});
++      tries.push_back({chop(3) + "e", 'g'});
++      tries.push_back({undoubled(chop(3)), 'g'});
++    }
++    if (ends("ly")) tries.push_back({chop(2), 'l'});
++    if (ends("er")) {
++      tries.push_back({chop(2), 'r'});
++      tries.push_back({chop(1), 'r'});
++    }
++
++    for (const auto &[stem, kind] : tries) {
++      const std::vector<int32_t> *found = Lookup(stem);
++      if (found == nullptr) continue;
++      const std::vector<int32_t> &stem_ids = *found;
++
++      // The stem's last sound, skipping stress and length marks.
++      std::string last;
++      for (auto i = stem_ids.rbegin(); i != stem_ids.rend(); ++i) {
++        const std::string &t = id2token[*i];
++        if (t == "ˈ" || t == "ˌ" || t == "ː") continue;
++        last = t;
++        break;
++      }
++      std::vector<std::string> suffix;
++      switch (kind) {
++        case 's':
++          if (last == "p" || last == "t" || last == "k" || last == "f" ||
++              last == "θ") {
++            suffix = {"s"};
++          } else if (last == "s" || last == "z" || last == "ʃ" ||
++                     last == "ʒ" || last == "ʧ" || last == "ʤ") {
++            suffix = {"ᵻ", "z"};
++          } else {
++            suffix = {"z"};
++          }
++          break;
++        case 'd':
++          if (last == "p" || last == "k" || last == "f" || last == "θ" ||
++              last == "ʃ" || last == "s" || last == "ʧ") {
++            suffix = {"t"};
++          } else if (last == "d" || last == "t") {
++            suffix = {"ᵻ", "d"};
++          } else {
++            suffix = {"d"};
++          }
++          break;
++        case 'g': suffix = {"ɪ", "ŋ"}; break;
++        case 'l': suffix = {"l", "i"}; break;
++        case 'r': suffix = {"ɚ"}; break;
++        default: break;  // '0': the stem as it is
++      }
++      *ids = stem_ids;
++      for (const auto &t : suffix) {
++        auto tk = token2id_.find(t);
++        if (tk == token2id_.end()) {
++          ids->clear();
++          break;
++        }
++        ids->push_back(tk->second);
++      }
++      if (!ids->empty()) return true;
++    }
++    return false;
++  }
++
+   void InitTokens(const std::string &tokens) {
+     auto is = OpenInputFile(tokens);
+     InitTokens(is);
+@@ -571,6 +721,12 @@ KokoroMultiLangLexicon::KokoroMultiLangLexicon(
+     : impl_(std::make_unique<Impl>(mgr, tokens, lexicon, data_dir, meta_data,
+                                    debug)) {}  // NOLINT
+ 
++std::vector<TokenIDs> KokoroMultiLangLexicon::ConvertTextToTokenIdsWith(
++    const std::string &text, const std::string &voice,
++    const std::string &lexicon_lines) const {
++  return impl_->ConvertTextToTokenIdsWith(text, voice, lexicon_lines);
++}
++
+ std::vector<TokenIDs> KokoroMultiLangLexicon::ConvertTextToTokenIds(
+     const std::string &text, const std::string &voice /*= ""*/) const {
+   return impl_->ConvertTextToTokenIds(text, voice);
+diff --git a/sherpa-onnx/csrc/kokoro-multi-lang-lexicon.h b/sherpa-onnx/csrc/kokoro-multi-lang-lexicon.h
+index a6d5096..14b6879 100644
+--- a/sherpa-onnx/csrc/kokoro-multi-lang-lexicon.h
++++ b/sherpa-onnx/csrc/kokoro-multi-lang-lexicon.h
+@@ -33,6 +33,12 @@ class KokoroMultiLangLexicon : public OfflineTtsFrontend {
+   std::vector<TokenIDs> ConvertTextToTokenIds(
+       const std::string &text, const std::string &voice = "") const override;
+ 
++  // (Patched.) Like ConvertTextToTokenIds, with pronunciations for this call only:
++  // lexicon lines ("word sym sym ...") that win over the lexicon's own.
++  std::vector<TokenIDs> ConvertTextToTokenIdsWith(
++      const std::string &text, const std::string &voice,
++      const std::string &lexicon_lines) const;
++
+  private:
+   class Impl;
+   std::unique_ptr<Impl> impl_;
+diff --git a/sherpa-onnx/csrc/offline-tts-kokoro-impl.h b/sherpa-onnx/csrc/offline-tts-kokoro-impl.h
+index 1a58a6e..0482386 100644
+--- a/sherpa-onnx/csrc/offline-tts-kokoro-impl.h
++++ b/sherpa-onnx/csrc/offline-tts-kokoro-impl.h
+@@ -240,8 +240,15 @@ class OfflineTtsKokoroImpl : public OfflineTtsImpl {
+                                                : config_.model.kokoro.lang;
+     }
+ 
+-    std::vector<TokenIDs> token_ids = frontend_->ConvertTextToTokenIds(
+-        text, lang);
++    // (Patched.) Pronunciations that come with this request, as lexicon lines.
++    std::string pronunciations = gen_config.GetExtraString("pronunciations");
++    std::vector<TokenIDs> token_ids;
++    auto *multi = dynamic_cast<KokoroMultiLangLexicon *>(frontend_.get());
++    if (multi != nullptr && !pronunciations.empty()) {
++      token_ids = multi->ConvertTextToTokenIdsWith(text, lang, pronunciations);
++    } else {
++      token_ids = frontend_->ConvertTextToTokenIds(text, lang);
++    }
+ 
+     if (token_ids.empty() ||
+         (token_ids.size() == 1 && token_ids[0].tokens.empty())) {
+diff --git a/sherpa-onnx/csrc/offline-tts-kokoro-model-config.cc b/sherpa-onnx/csrc/offline-tts-kokoro-model-config.cc
+index 5082158..e0196ff 100644
+--- a/sherpa-onnx/csrc/offline-tts-kokoro-model-config.cc
++++ b/sherpa-onnx/csrc/offline-tts-kokoro-model-config.cc
+@@ -83,38 +83,7 @@ bool OfflineTtsKokoroModelConfig::Validate() const {
+     }
+   }
+ 
+-  if (data_dir.empty()) {
+-    SHERPA_ONNX_LOGE("Please provide --kokoro-data-dir");
+-    return false;
+-  }
+-
+-  if (!FileExists(data_dir + "/phontab")) {
+-    SHERPA_ONNX_LOGE(
+-        "'%s/phontab' does not exist. Please check --kokoro-data-dir",
+-        data_dir.c_str());
+-    return false;
+-  }
+-
+-  if (!FileExists(data_dir + "/phonindex")) {
+-    SHERPA_ONNX_LOGE(
+-        "'%s/phonindex' does not exist. Please check --kokoro-data-dir",
+-        data_dir.c_str());
+-    return false;
+-  }
+-
+-  if (!FileExists(data_dir + "/phondata")) {
+-    SHERPA_ONNX_LOGE(
+-        "'%s/phondata' does not exist. Please check --kokoro-data-dir",
+-        data_dir.c_str());
+-    return false;
+-  }
+-
+-  if (!FileExists(data_dir + "/intonations")) {
+-    SHERPA_ONNX_LOGE(
+-        "'%s/intonations' does not exist. Please check --kokoro-data-dir",
+-        data_dir.c_str());
+-    return false;
+-  }
++  // (Patched: no eSpeak NG here, so no data_dir is needed or checked.)
+ 
+   if (!dict_dir.empty()) {
+     SHERPA_ONNX_LOGE(
+diff --git a/stub-piper/CMakeLists.txt b/stub-piper/CMakeLists.txt
+new file mode 100644
+index 0000000..f5276fa
+--- /dev/null
++++ b/stub-piper/CMakeLists.txt
+@@ -0,0 +1,2 @@
++add_library(piper_phonemize STATIC stub.cc)
++target_include_directories(piper_phonemize PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+diff --git a/stub-piper/include/espeak-ng/speak_lib.h b/stub-piper/include/espeak-ng/speak_lib.h
+new file mode 100644
+index 0000000..6f4bea9
+--- /dev/null
++++ b/stub-piper/include/espeak-ng/speak_lib.h
+@@ -0,0 +1,5 @@
++// Stand-in for eSpeak NG's header (GPL-3.0-or-later), written from scratch for this build:
++// declares only what sherpa-onnx's piper-phonemize-lexicon.cc names. Nothing of eSpeak NG is here.
++#pragma once
++#define AUDIO_OUTPUT_SYNCHRONOUS 2
++extern "C" int espeak_Initialize(int output, int buflength, const char *path, int options);
+diff --git a/stub-piper/include/phoneme_ids.hpp b/stub-piper/include/phoneme_ids.hpp
+new file mode 100644
+index 0000000..2b55a18
+--- /dev/null
++++ b/stub-piper/include/phoneme_ids.hpp
+@@ -0,0 +1,2 @@
++// Stand-in for piper-phonemize's header, empty on purpose (see speak_lib.h).
++#pragma once
+diff --git a/stub-piper/include/phonemize.hpp b/stub-piper/include/phonemize.hpp
+new file mode 100644
+index 0000000..d6a4a31
+--- /dev/null
++++ b/stub-piper/include/phonemize.hpp
+@@ -0,0 +1,14 @@
++// Stand-in for piper-phonemize's phonemize.hpp: only the types and the one function
++// sherpa-onnx's piper-phonemize-lexicon.cc uses. This build has no eSpeak NG, so
++// phonemize_eSpeak always throws.
++#pragma once
++#include <string>
++#include <vector>
++namespace piper {
++using Phoneme = char32_t;
++struct eSpeakPhonemeConfig {
++  std::string voice = "en-us";
++};
++void phonemize_eSpeak(std::string text, eSpeakPhonemeConfig &config,
++                      std::vector<std::vector<Phoneme>> &phonemes);
++}  // namespace piper
+diff --git a/stub-piper/stub.cc b/stub-piper/stub.cc
+new file mode 100644
+index 0000000..850bcfc
+--- /dev/null
++++ b/stub-piper/stub.cc
+@@ -0,0 +1,10 @@
++// Runtime half of the stand-in: this build has no eSpeak NG, so asking for it fails.
++#include <stdexcept>
++#include "espeak-ng/speak_lib.h"
++#include "phonemize.hpp"
++namespace piper {
++void phonemize_eSpeak(std::string, eSpeakPhonemeConfig &, std::vector<std::vector<Phoneme>> &) {
++  throw std::runtime_error("this sherpa-onnx build has no eSpeak NG");
++}
++}  // namespace piper
++extern "C" int espeak_Initialize(int, int, const char *, int) { return -1; }

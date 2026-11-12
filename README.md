@@ -117,6 +117,14 @@ libraries in sherpa-onnx's prebuilt library: this repository's
 [`tools/sources.sh`](tools/sources.sh) gathers. The models have licences of their own: Kokoro
 Apache-2.0, Parakeet CC-BY-4.0 (by NVIDIA), Silero VAD MIT.
 
+**The build without eSpeak NG is `MIT OR Apache-2.0` as a whole.** Built with `--features
+no-espeak` against a sherpa-onnx that [`tools/build-sherpa-no-espeak.sh`](tools/build-sherpa-no-espeak.sh)
+makes from source with a patch (Apache-2.0, notice of change in
+[`tools/no-espeak/`](tools/no-espeak/README.md)), the program links no GPL code, and its
+`node.license` says so. Kokoro then sounds out only the words its lexicon has, plus inflections
+and the pronunciations a client sends (CNP's `pronunciations`). Its notices are made with
+`NO_ESPEAK=1 tools/notices.sh`, which leaves out eSpeak NG's and piper-phonemize's.
+
 Every copy of the program goes with the notices of what it is built with:
 `tools/notices.sh` writes them to `target/licences/THIRD-PARTY-NOTICES.txt`. They are the
 crates' licences (with cargo-about 0.9: `cargo install --locked cargo-about@0.9.2 --features

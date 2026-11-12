@@ -56,6 +56,10 @@ rule="--------------------------------------------------------------------------
     printf '\n\nC and C++ libraries in sherpa-onnx'"'"'s prebuilt library\n'
     printf -- '----------------------------------------------------\n'
     for library in licences/*/; do
+        # The build without eSpeak NG (tools/no-espeak/README.md) links neither of these.
+        if [[ -n "${NO_ESPEAK:-}" ]]; then
+            case "$(basename "$library")" in espeak-ng | piper-phonemize) continue ;; esac
+        fi
         for file in "$library"*; do
             printf '\n%s\n%s: %s\n\n' "$rule" "$(basename "$library")" "$(basename "$file")"
             cat "$file"

@@ -97,9 +97,14 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Who wrote it.
 pub const AUTHOR: &str = "Carlos Justiniano";
 
-/// The program's licence as a whole: it links eSpeak NG (GPL-3.0-or-later) through
-/// sherpa-onnx. Our own code is `MIT OR Apache-2.0`.
-pub const LICENSE: &str = "GPL-3.0-or-later";
+/// The program's licence as a whole. The usual build links eSpeak NG (GPL-3.0-or-later)
+/// through sherpa-onnx; the `no-espeak` build links a sherpa-onnx built without it
+/// (`tools/no-espeak/README.md`), so our own licence, `MIT OR Apache-2.0`, is the whole's.
+pub const LICENSE: &str = if cfg!(feature = "no-espeak") {
+    "MIT OR Apache-2.0"
+} else {
+    "GPL-3.0-or-later"
+};
 
 /// Where its source is.
 pub const SOURCE: &str = "https://github.com/cjus/audio-chat-box";
