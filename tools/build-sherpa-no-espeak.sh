@@ -32,7 +32,16 @@ git -C "$src" checkout --quiet -- .
 git -C "$src" clean --quiet -fd
 git -C "$src" apply "$here/no-espeak/sherpa-onnx-1.13.8.patch"
 
-cmake -S "$src" -B "$build" -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
+case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*) windows=1 ;;
+    *) windows=0 ;;
+esac
+generator=()
+if [[ $windows == 1 ]]; then
+    generator=(-G Ninja)
+fi
+
+cmake -S "$src" -B "$build" ${generator[@]+"${generator[@]}"} -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
     -DSHERPA_ONNX_ENABLE_C_API=ON -DSHERPA_ONNX_ENABLE_TTS=ON \
     -DSHERPA_ONNX_ENABLE_BINARY=OFF -DSHERPA_ONNX_ENABLE_PORTAUDIO=OFF \
     -DSHERPA_ONNX_ENABLE_WEBSOCKET=OFF -DSHERPA_ONNX_ENABLE_CHECK=OFF \
@@ -43,14 +52,27 @@ cmake --build "$build" --config Release -j "$(getconf _NPROCESSORS_ONLN)"
 lib="$out/lib"
 rm -rf "$lib"
 mkdir -p "$lib"
-cp "$build"/lib/*.a "$build"/_deps/onnxruntime-src/lib/libonnxruntime.a "$lib/"
-# sherpa-onnx-sys links these two by name; they hold nothing (no eSpeak NG here).
-# (An archive needs a member on macOS, so each holds one empty object file.)
-: > "$out/empty.c"
-cc -c "$out/empty.c" -o "$out/empty.o"
-for name in espeak-ng ucd; do
-    rm -f "$lib/lib$name.a"
-    ar rcs "$lib/lib$name.a" "$out/empty.o"
-done
+if [[ $windows == 1 ]]; then
+    # Single-config Ninja: the libraries are where CMake put them, named <name>.lib.
+    find "$build" -name '*.lib' -not -path '*/CMakeFiles/*' -exec cp {} "$lib/" \;
+    cp "$build/_deps/onnxruntime-src/lib/onnxruntime.lib" "$lib/"
+    # sherpa-onnx-sys links these two by name; they hold nothing (no eSpeak NG here).
+    : > "$out/empty.c"
+    (cd "$out" && cl -nologo -MT -c empty.c -Fo:empty.obj)
+    for name in espeak-ng ucd; do
+        rm -f "$lib/$name.lib"
+        lib -nologo "-OUT:$lib/$name.lib" "$out/empty.obj"
+    done
+else
+    cp "$build"/lib/*.a "$build"/_deps/onnxruntime-src/lib/libonnxruntime.a "$lib/"
+    # sherpa-onnx-sys links these two by name; they hold nothing (no eSpeak NG here).
+    # (An archive needs a member on macOS, so each holds one empty object file.)
+    : > "$out/empty.c"
+    cc -c "$out/empty.c" -o "$out/empty.o"
+    for name in espeak-ng ucd; do
+        rm -f "$lib/lib$name.a"
+        ar rcs "$lib/lib$name.a" "$out/empty.o"
+    done
+fi
 echo "sherpa-onnx $TAG, patched, without eSpeak NG (tools/no-espeak/README.md)" > "$lib/NO-ESPEAK"
 echo "built: SHERPA_ONNX_LIB_DIR=$lib"
