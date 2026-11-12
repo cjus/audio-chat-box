@@ -36,9 +36,12 @@ case "$(uname -s)" in
     MINGW* | MSYS* | CYGWIN*) windows=1 ;;
     *) windows=0 ;;
 esac
+# Windows: CMake's newest Visual Studio generator, 64-bit (sherpa-onnx's ONNX Runtime
+# download checks the platform name, which Ninja doesn't set), so the libraries land in a
+# per-configuration folder, and are found by name below.
 generator=()
 if [[ $windows == 1 ]]; then
-    generator=(-G Ninja)
+    generator=(-A x64)
 fi
 
 cmake -S "$src" -B "$build" ${generator[@]+"${generator[@]}"} -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
@@ -53,9 +56,8 @@ lib="$out/lib"
 rm -rf "$lib"
 mkdir -p "$lib"
 if [[ $windows == 1 ]]; then
-    # Single-config Ninja: the libraries are where CMake put them, named <name>.lib.
+    # The libraries (ONNX Runtime's among them) are named <name>.lib.
     find "$build" -name '*.lib' -not -path '*/CMakeFiles/*' -exec cp {} "$lib/" \;
-    cp "$build/_deps/onnxruntime-src/lib/onnxruntime.lib" "$lib/"
     # sherpa-onnx-sys links these two by name; they hold nothing (no eSpeak NG here).
     : > "$out/empty.c"
     (cd "$out" && cl -nologo -MT -c empty.c -Fo:empty.obj)

@@ -56,12 +56,14 @@ jobs:
         run: |
           cargo build --release --locked --features no-espeak
           cargo test --locked --features no-espeak
+      # The stand-in piper-phonemize library defines a stub `espeak_Initialize`, so look for
+      # what only the real eSpeak NG holds: its `espeak_ng_Initialize` (the usual build has it, this one doesn't).
       - name: The program holds no eSpeak NG
         run: |
           bin=target/release/audio-chat-box
           [ -f "$bin.exe" ] && bin="$bin.exe"
-          if grep -qa espeak_Initialize "$bin"; then
-            echo "$bin contains eSpeak NG's espeak_Initialize" >&2
+          if grep -qa espeak_ng_Initialize "$bin"; then
+            echo "$bin contains eSpeak NG's espeak_ng_Initialize" >&2
             exit 1
           fi
-          echo "no espeak_Initialize in $bin"
+          echo "no eSpeak NG in $bin"
