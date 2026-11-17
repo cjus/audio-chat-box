@@ -125,6 +125,14 @@ makes from source with a patch (Apache-2.0, notice of change in
 and the pronunciations a client sends (CNP's `pronunciations`). Its notices are made with
 `NO_ESPEAK=1 tools/notices.sh`, which leaves out eSpeak NG's and piper-phonemize's.
 
+**On an iPad the no-eSpeak build is a library, not a program.** iPadOS doesn't let an app
+start another program, so there a client links this crate with `no-espeak` and runs
+[`node::run`](src/node.rs) on a thread of its own, over a pair of pipes, configured with the
+same words it would start the program with ([`args::parse`](src/args.rs); cjus/chessgui#687,
+#698). `tools/build-sherpa-no-espeak.sh --ios` (or `--ios-sim`) builds the library for it,
+and writes the Cargo config that links it ([`tools/no-espeak/`](tools/no-espeak/README.md),
+"On an iPad"). Only this build may be linked: the usual one is GPL as a whole.
+
 Every copy of the program goes with the notices of what it is built with:
 `tools/notices.sh` writes them to `target/licences/THIRD-PARTY-NOTICES.txt`. They are the
 crates' licences (with cargo-about 0.9: `cargo install --locked cargo-about@0.9.2 --features

@@ -9,9 +9,14 @@ A maintainer's own instructions, if any, are in `CLAUDE.local.md`, which is not 
 
 ## Rules
 
-1. **It is a separate program, and stays one.** It links eSpeak NG (GPL-3.0-or-later) through
-   sherpa-onnx, so a closed-source client must never link it: the client starts it and talks
-   to it. Nothing here may become a library a client depends on.
+1. **It is a separate program, and stays one, except on an iPad without eSpeak NG.** It links
+   eSpeak NG (GPL-3.0-or-later) through sherpa-onnx, so a closed-source client must never
+   link it: the client starts it and talks to it. The one exception (Carlos, cjus/chessgui#687):
+   where a program can't be started (an iPad app), a client links the `no-espeak` build, which
+   is `MIT OR Apache-2.0` as a whole, and runs `node::run` on a thread with `args::parse`'s
+   config (README, "Licence"; `tools/no-espeak/README.md`, "On an iPad"). It is still the same
+   node behind the same protocol: no API for a client beyond `args`, `node::run` and the
+   protocol's messages.
 2. **Nothing of a client's domain.** No chess (or any product's) words, phrases or tuning
    are built in: a client gives its own hotwords and listen settings in its requests. Its
    recordings and phrase lists stay in its own repository.
