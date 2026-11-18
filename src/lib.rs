@@ -26,6 +26,12 @@
 //! protocol, it doesn't (cjus/chessgui#71). Our own code here is `MIT OR Apache-2.0`; the
 //! program as built is GPL-3.0-or-later.
 //!
+//! **Except on an iPad.** iPadOS doesn't let an app start a program, so there a client links
+//! the `no-espeak` build (`MIT OR Apache-2.0` as a whole: no eSpeak NG in it) and runs
+//! [`node::run`] on a thread of its own over a pair of pipes, configured with the words it
+//! would start the program with ([`args::parse`]; cjus/chessgui#687, #698). The client still
+//! talks to the node only through the protocol.
+//!
 //! ## Origins
 //!
 //! It began as `solrac-voice`, the voice of Solrac, a chess board (`cjus/chessgui`): its code
@@ -43,6 +49,7 @@
 #![forbid(unsafe_code)]
 
 pub mod align;
+pub mod args;
 pub mod hear;
 pub mod listen;
 pub mod models;

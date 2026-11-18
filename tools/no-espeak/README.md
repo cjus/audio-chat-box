@@ -45,6 +45,37 @@ them, with their sizes and checksums, only with the feature, and the Kokoro conf
 asks for the data folder (`src/speak.rs`). The archives are in the `models-v1` release, and
 a product with its own copy of the models (Solrac's) puts them there too.
 
+## On an iPad
+
+```text
+tools/build-sherpa-no-espeak.sh --ios [<folder>]       # default: target/sherpa-no-espeak-ios
+tools/build-sherpa-no-espeak.sh --ios-sim [<folder>]   # the Simulator on an Apple silicon Mac
+SHERPA_ONNX_LIB_DIR=<folder>/lib IPHONEOS_DEPLOYMENT_TARGET=17.0 \
+    cargo build --config <folder>/cargo-config.toml --release --target aarch64-apple-ios --features no-espeak
+```
+
+An iPad app can't start a program, so there this build is linked into the app as a library
+(cjus/chessgui#687, #698; README, "Licence"). The same patched sherpa-onnx is built with its
+own iOS toolchain file (`toolchains/ios.toolchain.cmake`, as its `build-ios.sh` does), for
+iPadOS `IPHONEOS_DEPLOYMENT_TARGET` (default 17.0), against ONNX Runtime 1.28.2's static iOS
+xcframework from the same builds `licences/README.md` names, checked by its SHA-256. So the
+libraries and their licences are the Mac's.
+
+Three things differ from the Mac's build, each handled by the script:
+
+- **Static linking through an override.** sherpa-onnx-sys 1.13.8 links iOS only as a shared
+  library, whatever its `static` feature says, and fails without a `.dylib`. The script
+  writes `cargo-config.toml`, which overrides that build script (Cargo's override of a
+  `links` build script: sherpa-onnx-sys says `links = "sherpa-onnx"`) with the static
+  libraries it would have named. Pass it after the command, `cargo build --config <file>`:
+  `cargo clippy` doesn't pass on a `--config` given before it.
+- **clang's runtime.** ONNX Runtime's Core ML code calls `___isPlatformVersionAtLeast`
+  (Objective-C's `@available`), which is in clang's `libclang_rt.ios.a`, not in what rustc
+  links. The config links it, unbundled (`static:-bundle`: rustc can't read a universal
+  archive), and the Core ML framework.
+- **The empty `espeak-ng` and `ucd` archives** are built for iOS, so the linker sees no Mac
+  object in an iPad app.
+
 ## Why it can't be mistaken for the usual build
 
 `sherpa-onnx-sys` links `espeak-ng` and `ucd` by name, so the script puts two empty archives

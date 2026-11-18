@@ -117,7 +117,7 @@ pub const PRONUNCIATIONS: bool = cfg!(feature = "pronunciations");
 /// How often a download's progress is reported, at most (spec, 8.4: "about once a second").
 pub const PROGRESS_INTERVAL: Duration = Duration::from_secs(1);
 
-/// What the node was started with: its command line (`main.rs`).
+/// What the node was started with: its command line ([`crate::args`]).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Config {
     /// Where the models are, or are downloaded to. Without one, every model fails.
