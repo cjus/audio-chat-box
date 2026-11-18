@@ -51,7 +51,7 @@ a product with its own copy of the models (Solrac's) puts them there too.
 tools/build-sherpa-no-espeak.sh --ios [<folder>]       # default: target/sherpa-no-espeak-ios
 tools/build-sherpa-no-espeak.sh --ios-sim [<folder>]   # the Simulator on an Apple silicon Mac
 SHERPA_ONNX_LIB_DIR=<folder>/lib IPHONEOS_DEPLOYMENT_TARGET=17.0 \
-    cargo --config <folder>/cargo-config.toml build --release --target aarch64-apple-ios --features no-espeak
+    cargo build --config <folder>/cargo-config.toml --release --target aarch64-apple-ios --features no-espeak
 ```
 
 An iPad app can't start a program, so there this build is linked into the app as a library
@@ -67,7 +67,8 @@ Three things differ from the Mac's build, each handled by the script:
   library, whatever its `static` feature says, and fails without a `.dylib`. The script
   writes `cargo-config.toml`, which overrides that build script (Cargo's override of a
   `links` build script: sherpa-onnx-sys says `links = "sherpa-onnx"`) with the static
-  libraries it would have named. Pass it with `cargo --config`.
+  libraries it would have named. Pass it after the command, `cargo build --config <file>`:
+  `cargo clippy` doesn't pass on a `--config` given before it.
 - **clang's runtime.** ONNX Runtime's Core ML code calls `___isPlatformVersionAtLeast`
   (Objective-C's `@available`), which is in clang's `libclang_rt.ios.a`, not in what rustc
   links. The config links it, unbundled (`static:-bundle`: rustc can't read a universal

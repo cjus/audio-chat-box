@@ -10,8 +10,8 @@
 # -ios-sim by default. IPHONEOS_DEPLOYMENT_TARGET (default 17.0) is the oldest iPadOS it runs
 # on, and should be the app's. Then, from the app's build:
 #
-#   SHERPA_ONNX_LIB_DIR=<folder>/lib IPHONEOS_DEPLOYMENT_TARGET=17.0 \
-#       cargo build --release --target aarch64-apple-ios --features no-espeak
+#   SHERPA_ONNX_LIB_DIR=<folder>/lib IPHONEOS_DEPLOYMENT_TARGET=17.0 cargo build \
+#       --config <folder>/cargo-config.toml --release --target aarch64-apple-ios --features no-espeak
 #
 # tools/no-espeak/README.md says what the patch does and why this program is then
 # MIT OR Apache-2.0. Needs git, cmake, a C++17 compiler and ar. The first build downloads ONNX
@@ -164,7 +164,8 @@ echo "built: SHERPA_ONNX_LIB_DIR=$lib"
 # `static` feature there) and finds no .dylib here. An iPad app links it statically instead,
 # through Cargo's override of a `links` build script (sherpa-onnx-sys says
 # `links = "sherpa-onnx"`): this file names the libraries in its place, as its build script
-# would for a static build. Pass it to the app's build with `cargo --config <file>`.
+# would for a static build. Pass it to the app's build after the command,
+# `cargo build --config <file>` (`cargo clippy` doesn't pass on a `--config` before it).
 # ONNX Runtime for iOS also needs clang's runtime (`___isPlatformVersionAtLeast`, for its
 # `@available` checks), which rustc doesn't link, and the Core ML framework its Core ML
 # execution provider calls.
@@ -175,7 +176,7 @@ if [[ $platform != host ]]; then
     if [[ $platform == ios ]]; then rt=clang_rt.ios; else rt=clang_rt.iossim; fi
     {
         echo "# Made by audio-chat-box's tools/build-sherpa-no-espeak.sh --$platform: links the"
-        echo "# patched sherpa-onnx (no eSpeak NG) in $lib statically. Use: cargo --config <this file>"
+        echo "# patched sherpa-onnx (no eSpeak NG) in $lib statically. Use: cargo build --config <this file>"
         echo "[target.$triple.sherpa-onnx]"
         echo "rustc-link-search = [\"native=$lib\", \"native=$clang_rt\"]"
         printf 'rustc-link-lib = ['
@@ -186,5 +187,5 @@ if [[ $platform != host ]]; then
         done
         echo "\"static:-bundle=$rt\", \"dylib=c++\", \"framework=Foundation\", \"framework=CoreML\"]"
     } > "$config"
-    echo "and for the iPad's build: cargo --config $config"
+    echo "and for the iPad's build: cargo build --config $config"
 fi
