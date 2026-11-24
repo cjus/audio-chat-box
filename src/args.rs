@@ -29,6 +29,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
         listening: None,
         offline: false,
         models_url: None,
+        load_one_at_a_time: false,
     };
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
@@ -41,6 +42,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
             "--hear" => config.transcription = model_for(&value("--hear")?, "--hear")?,
             "--listen" => config.listening = model_for(&value("--listen")?, "--listen")?,
             "--offline" => config.offline = true,
+            "--load-one-at-a-time" => config.load_one_at_a_time = true,
             "--models-url" => {
                 let url = value("--models-url")?;
                 // The archives' names go after it.
@@ -106,6 +108,18 @@ mod tests {
         assert_eq!(config.listening, None, "listening is asked for");
         assert_eq!(config.models_dir, None);
         assert!(!config.offline);
+        assert!(
+            !config.load_one_at_a_time,
+            "loading together is the default"
+        );
+    }
+
+    #[test]
+    fn loading_one_at_a_time_is_asked_for() {
+        let Ok(Command::Serve(config)) = parse(&["--load-one-at-a-time"]) else {
+            panic!("expected a config");
+        };
+        assert!(config.load_one_at_a_time);
     }
 
     #[test]

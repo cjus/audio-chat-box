@@ -3,6 +3,7 @@
 //! ```text
 //! audio-chat-box [--models <folder>] [--models-url <url>] [--speak <model|none>]
 //!                [--hear <model|none>] [--listen <model|none>] [--offline]
+//!                [--load-one-at-a-time]
 //! ```
 //!
 //! Its client starts it with its models folder (`--models`), and with the models its
@@ -30,7 +31,7 @@ fn usage() -> String {
     };
     format!(
         "usage: audio-chat-box [--models <folder>] [--models-url <url>] [--speak <model|none>] \
-         [--hear <model|none>] [--listen <model|none>] [--offline]\n\n\
+         [--hear <model|none>] [--listen <model|none>] [--offline] [--load-one-at-a-time]\n\n\
          A voice node on standard input and output (docs/protocol.md): Kokoro reads text \
          aloud, Parakeet hears speech, Silero VAD finds it as it comes.\n\n  \
          --models <folder>  where the models are, and are downloaded to the first time\n  \
@@ -39,6 +40,7 @@ fn usage() -> String {
          --hear <model>     {} (default {}), or none\n  \
          --listen <model>   {}, or none (the default); needs --hear\n  \
          --offline          never download: a model that isn't in the folder fails\n  \
+         --load-one-at-a-time  load the models one after another, using less memory at once\n  \
          --version          print the version\n",
         models::MODELS_URL,
         ids(cnp::voice::ModelPurpose::Speak),
