@@ -1057,7 +1057,13 @@ fn run_jobs(jobs: [Option<Preparation>; 3], one_at_a_time: bool) {
         let jobs: Vec<Preparation> = jobs.collect();
         thread::spawn(move || {
             for job in jobs {
-                job();
+                // Each model on a thread of its own, ended before the next starts. On the
+                // iPad the footprint stayed at a model's load peak until the thread that
+                // loaded it exited (it fell by 770 MB the moment the last of three did,
+                // cjus/chessgui#838), so a thread for each gives every model's leftovers
+                // back before the next one's peak. Preparing never panics outward: `join`
+                // only reports one, which `prepare` has already turned into a state.
+                let _ = thread::spawn(job).join();
             }
         });
     } else {
