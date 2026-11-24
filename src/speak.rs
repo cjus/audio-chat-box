@@ -200,6 +200,17 @@ const TOKENS_FILE: &str = "tokens.txt";
 #[cfg(not(feature = "no-espeak"))]
 const ESPEAK_DATA: &str = "espeak-ng-data";
 
+/// The text with typographic apostrophes made straight. A model's reply often writes
+/// "You’re" with U+2019, but the lexicon the no-eSpeak build reads from (Kokoro's
+/// `lexicon-us-en.txt`) holds "you're" with `'` and nothing with `’`: the build skipped the
+/// mark ("OOV skipped"), and read "you" and "re" ("you ray welcome"). eSpeak NG's own rules
+/// read both, so straightening changes nothing there. U+2018 (a left quote, used as an
+/// apostrophe when a text starts a word with one) and U+02BC (the modifier letter apostrophe)
+/// are made straight too.
+fn straight_apostrophes(text: &str) -> String {
+    text.replace(['\u{2019}', '\u{2018}', '\u{02BC}'], "'")
+}
+
 /// Reads text aloud with Kokoro, in any of its voices.
 pub struct Speaker {
     tts: OfflineTts,
@@ -265,7 +276,7 @@ impl Speaker {
         if stop.load(Ordering::Relaxed) {
             return Err(SpeechError::Stopped);
         }
-        let text = text.replace('\0', " ");
+        let text = straight_apostrophes(&text.replace('\0', " "));
         // The client's pronunciations go with this request alone (`src/pronounce.rs`); a
         // sherpa-onnx that doesn't read the key ignores it.
         let extra = (!pronunciations.is_empty()).then(|| {
@@ -302,6 +313,15 @@ impl Speaker {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn typographic_apostrophes_are_made_straight() {
+        assert_eq!(
+            super::straight_apostrophes("You\u{2019}re welcome, it\u{2018}s fine, don\u{02BC}t"),
+            "You're welcome, it's fine, don't"
+        );
+        assert_eq!(super::straight_apostrophes("No marks."), "No marks.");
+    }
+
     use super::*;
     use crate::models::KOKORO_INT8;
 
