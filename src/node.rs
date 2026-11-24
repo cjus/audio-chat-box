@@ -134,6 +134,12 @@ pub struct Config {
     /// Where the models are downloaded from, ending in `/`. Missing:
     /// [`models::MODELS_URL`].
     pub models_url: Option<String>,
+    /// Load one model at a time, each once the one before is loaded, instead of all at once
+    /// (`--load-one-at-a-time`). Loading a model takes several times its size in memory for a
+    /// moment, so loading them together adds those moments up: on an iPad, which ends an app
+    /// that passes its memory limit, that is the difference between starting and being ended
+    /// (cjus/chessgui#838). A computer with room to spare loads them together, faster.
+    pub load_one_at_a_time: bool,
 }
 
 /// Reads text aloud: Kokoro's [`Speaker`], or a fake in tests.
@@ -335,6 +341,8 @@ struct Node {
     speech: Option<Arc<Slot<dyn Speech>>>,
     hearing: Option<Arc<Slot<dyn Hearing>>>,
     listening: Option<Arc<Slot<dyn Detect>>>,
+    /// Held while a model loads, when [`Config::load_one_at_a_time`].
+    loading: Option<Arc<Mutex<()>>>,
     jobs: Jobs,
     listens: Listens,
 }
@@ -376,6 +384,7 @@ impl Node {
             speech: config.speech.map(|model| Arc::new(Slot::new(model))),
             hearing: config.transcription.map(|model| Arc::new(Slot::new(model))),
             listening: config.listening.map(|model| Arc::new(Slot::new(model))),
+            loading: config.load_one_at_a_time.then(Arc::default),
             config,
             state: State::Starting,
             jobs: Arc::default(),
@@ -586,6 +595,7 @@ impl Node {
                 dir.clone(),
                 from.clone(),
                 &self.output,
+                self.loading.clone(),
                 load,
             );
         }
@@ -598,6 +608,7 @@ impl Node {
                 dir.clone(),
                 from.clone(),
                 &self.output,
+                self.loading.clone(),
                 load,
             );
         }
@@ -605,7 +616,14 @@ impl Node {
             let load = |model: &LocalModel, folder: &Path| -> Result<Arc<dyn Detect>, _> {
                 Ok(Arc::new(Detector::load(model, folder)?))
             };
-            spawn_prepare(Arc::clone(slot), dir, from, &self.output, load);
+            spawn_prepare(
+                Arc::clone(slot),
+                dir,
+                from,
+                &self.output,
+                self.loading.clone(),
+                load,
+            );
         }
     }
 
@@ -1024,12 +1042,15 @@ fn wav(samples: &Samples) -> Vec<u8> {
 
 /// Starts a thread that gets `slot`'s model ready: downloads it into `models_dir` from the
 /// address `from` unless it is there (or there is no address: offline), loads it with `load`,
-/// and reports each stage (see the [module docs](self)).
+/// and reports each stage (see the [module docs](self)). With a `gate` ([`Config::load_one_at_a_time`])
+/// it loads only while it holds it, so models load one after another; downloads still run
+/// together, as they take little memory.
 fn spawn_prepare<T: ?Sized + Send + Sync + 'static>(
     slot: Arc<Slot<T>>,
     models_dir: Option<PathBuf>,
     from: Option<String>,
     output: &Output,
+    gate: Option<Arc<Mutex<()>>>,
     load: impl FnOnce(&LocalModel, &Path) -> Result<Arc<T>, SpeechError> + Send + 'static,
 ) {
     let output = Arc::clone(output);
@@ -1050,7 +1071,11 @@ fn spawn_prepare<T: ?Sized + Send + Sync + 'static>(
                     models_dir.display()
                 ));
             };
+            // Waiting its turn is still "loading" to the client.
             slot.set_state(models::state(Stage::Loading), &output);
+            let _turn = gate
+                .as_ref()
+                .map(|gate| gate.lock().unwrap_or_else(PoisonError::into_inner));
             load(&model, &folder).map_err(|error| format!("{name} couldn't be loaded: {error}"))
         })();
         match prepared {
@@ -1094,6 +1119,64 @@ fn download<T: ?Sized>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+
+    /// The most models loading at once, when two are prepared with `gate` (or none), each
+    /// load taking a moment.
+    fn most_loading_at_once(gate: Option<Arc<Mutex<()>>>) -> usize {
+        use std::sync::atomic::AtomicUsize;
+        let dir = std::env::temp_dir().join(format!(
+            "audio-chat-box-gate-{}-{}",
+            std::process::id(),
+            gate.is_some()
+        ));
+        let models = [models::KOKORO, models::PARAKEET];
+        for model in &models {
+            let folder = models::folder(model, &dir);
+            fs::create_dir_all(&folder).unwrap();
+            fs::write(folder.join(model.model_file), "weights").unwrap();
+        }
+        let (loading, most) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let output: Output = Arc::new(Mutex::new(Box::new(Written::default())));
+        let slots: Vec<Arc<Slot<u8>>> = models
+            .iter()
+            .map(|model| Arc::new(Slot::new(*model)))
+            .collect();
+        for slot in &slots {
+            let (loading, most) = (Arc::clone(&loading), Arc::clone(&most));
+            spawn_prepare(
+                Arc::clone(slot),
+                Some(dir.clone()),
+                None,
+                &output,
+                gate.clone(),
+                move |_: &LocalModel, _: &Path| {
+                    let now = loading.fetch_add(1, Ordering::SeqCst) + 1;
+                    most.fetch_max(now, Ordering::SeqCst);
+                    thread::sleep(Duration::from_millis(200));
+                    loading.fetch_sub(1, Ordering::SeqCst);
+                    Ok(Arc::new(1u8))
+                },
+            );
+        }
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while slots.iter().any(|slot| slot.ready.get().is_none()) {
+            assert!(Instant::now() < deadline, "the models didn't load");
+            thread::sleep(Duration::from_millis(10));
+        }
+        let _ = fs::remove_dir_all(&dir);
+        most.load(Ordering::SeqCst)
+    }
+
+    #[test]
+    fn models_load_together_unless_asked_to_one_at_a_time() {
+        assert_eq!(most_loading_at_once(None), 2, "together is the default");
+        assert_eq!(
+            most_loading_at_once(Some(Arc::default())),
+            1,
+            "one at a time never overlaps"
+        );
+    }
 
     /// What the node wrote, shared with the test.
     #[derive(Clone, Default)]
@@ -1821,6 +1904,7 @@ mod tests {
                 listening: Some(models::SILERO_VAD),
                 offline: true,
                 models_url: None,
+                load_one_at_a_time: false,
             },
         );
         let init = json!({"protocol": "1.0", "client": {"name": "test", "version": "1"}});
