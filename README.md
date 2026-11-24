@@ -54,7 +54,7 @@ target/release/audio-chat-box --models <folder>
 | `--hear <model>` | `parakeet` (the default), or `none` |
 | `--listen <model>` | `silero-vad`, or `none` (the default): listen to speech as it comes (`voice/listen`), heard with the `--hear` model |
 | `--offline` | Never download: a model that isn't in the folder fails |
-| `--load-one-at-a-time` | Load the models one after another instead of together: each takes several times its size in memory while it loads, which adds up on a device with a memory limit (an iPad). Slower to start |
+| `--load-one-at-a-time` | Prepare the models one after another instead of together (hearing, then listening, then speaking): each takes several times its size in memory while it loads, which adds up on a device with a memory limit (an iPad). Slower to start |
 
 It then reads messages, one JSON line each, and answers:
 

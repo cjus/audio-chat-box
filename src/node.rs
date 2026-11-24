@@ -134,8 +134,9 @@ pub struct Config {
     /// Where the models are downloaded from, ending in `/`. Missing:
     /// [`models::MODELS_URL`].
     pub models_url: Option<String>,
-    /// Load one model at a time, each once the one before is loaded, instead of all at once
-    /// (`--load-one-at-a-time`). Loading a model takes several times its size in memory for a
+    /// Prepare one model at a time (download, then load), each once the one before is ready,
+    /// instead of all at once: the one that hears, the one that finds speech, then the one
+    /// that speaks (`--load-one-at-a-time`). Loading a model takes several times its size in memory for a
     /// moment, so loading them together adds those moments up: on an iPad, which ends an app
     /// that passes its memory limit, that is the difference between starting and being ended
     /// (cjus/chessgui#838). A computer with room to spare loads them together, faster.
@@ -341,8 +342,6 @@ struct Node {
     speech: Option<Arc<Slot<dyn Speech>>>,
     hearing: Option<Arc<Slot<dyn Hearing>>>,
     listening: Option<Arc<Slot<dyn Detect>>>,
-    /// Held while a model loads, when [`Config::load_one_at_a_time`].
-    loading: Option<Arc<Mutex<()>>>,
     jobs: Jobs,
     listens: Listens,
 }
@@ -384,7 +383,6 @@ impl Node {
             speech: config.speech.map(|model| Arc::new(Slot::new(model))),
             hearing: config.transcription.map(|model| Arc::new(Slot::new(model))),
             listening: config.listening.map(|model| Arc::new(Slot::new(model))),
-            loading: config.load_one_at_a_time.then(Arc::default),
             config,
             state: State::Starting,
             jobs: Arc::default(),
@@ -586,44 +584,52 @@ impl Node {
             .unwrap_or(models::MODELS_URL);
         // No download at all, offline.
         let from = (!self.config.offline).then(|| url.to_string());
+        let mut speech: Option<Preparation> = None;
+        let mut hearing: Option<Preparation> = None;
+        let mut listening: Option<Preparation> = None;
         if let Some(slot) = &self.speech {
-            let load = |model: &LocalModel, folder: &Path| -> Result<Arc<dyn Speech>, _> {
-                Ok(Arc::new(Speaker::load(model, folder)?))
-            };
-            spawn_prepare(
+            let (slot, dir, from, output) = (
                 Arc::clone(slot),
                 dir.clone(),
                 from.clone(),
-                &self.output,
-                self.loading.clone(),
-                load,
+                Arc::clone(&self.output),
             );
+            speech = Some(Box::new(move || {
+                let load = |model: &LocalModel, folder: &Path| -> Result<Arc<dyn Speech>, _> {
+                    Ok(Arc::new(Speaker::load(model, folder)?))
+                };
+                prepare(slot, dir, from, &output, load);
+            }));
         }
         if let Some(slot) = &self.hearing {
-            let load = |model: &LocalModel, folder: &Path| -> Result<Arc<dyn Hearing>, _> {
-                Ok(Arc::new(Transcriber::load(model, folder)?))
-            };
-            spawn_prepare(
+            let (slot, dir, from, output) = (
                 Arc::clone(slot),
                 dir.clone(),
                 from.clone(),
-                &self.output,
-                self.loading.clone(),
-                load,
+                Arc::clone(&self.output),
             );
+            hearing = Some(Box::new(move || {
+                let load = |model: &LocalModel, folder: &Path| -> Result<Arc<dyn Hearing>, _> {
+                    Ok(Arc::new(Transcriber::load(model, folder)?))
+                };
+                prepare(slot, dir, from, &output, load);
+            }));
         }
         if let Some(slot) = &self.listening {
-            let load = |model: &LocalModel, folder: &Path| -> Result<Arc<dyn Detect>, _> {
-                Ok(Arc::new(Detector::load(model, folder)?))
-            };
-            spawn_prepare(
-                Arc::clone(slot),
-                dir,
-                from,
-                &self.output,
-                self.loading.clone(),
-                load,
-            );
+            let (slot, output) = (Arc::clone(slot), Arc::clone(&self.output));
+            listening = Some(Box::new(move || {
+                let load = |model: &LocalModel, folder: &Path| -> Result<Arc<dyn Detect>, _> {
+                    Ok(Arc::new(Detector::load(model, folder)?))
+                };
+                prepare(slot, dir, from, &output, load);
+            }));
+        }
+        if self.config.load_one_at_a_time {
+            // Hearing first (it is what Hands-free needs), then the voice that finds speech,
+            // then the one that speaks, which is the biggest wait the player notices least.
+            run_jobs([hearing, listening, speech], true);
+        } else {
+            run_jobs([speech, hearing, listening], false);
         }
     }
 
@@ -1040,52 +1046,63 @@ fn wav(samples: &Samples) -> Vec<u8> {
     file.into_inner()
 }
 
-/// Starts a thread that gets `slot`'s model ready: downloads it into `models_dir` from the
-/// address `from` unless it is there (or there is no address: offline), loads it with `load`,
-/// and reports each stage (see the [module docs](self)). With a `gate` ([`Config::load_one_at_a_time`])
-/// it loads only while it holds it, so models load one after another; downloads still run
-/// together, as they take little memory.
-fn spawn_prepare<T: ?Sized + Send + Sync + 'static>(
+/// One model's preparation, to run on a thread.
+type Preparation = Box<dyn FnOnce() + Send + 'static>;
+
+/// Runs the `jobs` that exist: each on a thread of its own, or, with `one_at_a_time`, one
+/// after another on a single thread, in the order given (see [`Config::load_one_at_a_time`]).
+fn run_jobs(jobs: [Option<Preparation>; 3], one_at_a_time: bool) {
+    let jobs = jobs.into_iter().flatten();
+    if one_at_a_time {
+        let jobs: Vec<Preparation> = jobs.collect();
+        thread::spawn(move || {
+            for job in jobs {
+                job();
+            }
+        });
+    } else {
+        for job in jobs {
+            thread::spawn(job);
+        }
+    }
+}
+
+/// Gets `slot`'s model ready: downloads it into `models_dir` from the address `from` unless
+/// it is there (or there is no address: offline), loads it with `load`, and reports each
+/// stage (see the [module docs](self)). Returns when it is ready or has failed.
+fn prepare<T: ?Sized + Send + Sync + 'static>(
     slot: Arc<Slot<T>>,
     models_dir: Option<PathBuf>,
     from: Option<String>,
     output: &Output,
-    gate: Option<Arc<Mutex<()>>>,
-    load: impl FnOnce(&LocalModel, &Path) -> Result<Arc<T>, SpeechError> + Send + 'static,
+    load: impl FnOnce(&LocalModel, &Path) -> Result<Arc<T>, SpeechError>,
 ) {
-    let output = Arc::clone(output);
-    thread::spawn(move || {
-        let model = slot.model;
-        let name = model.name;
-        let prepared = (|| {
-            let models_dir = models_dir.ok_or_else(|| {
-                format!("there is no models folder: start {NAME} with --models <folder>")
-            })?;
-            let folder = if models::is_ready(&model, &models_dir) {
-                models::folder(&model, &models_dir)
-            } else if let Some(from) = &from {
-                download(&slot, &models_dir, from, &output)?
-            } else {
-                return Err(format!(
-                    "{name} isn't in {}, and {NAME} was started --offline",
-                    models_dir.display()
-                ));
-            };
-            // Waiting its turn is still "loading" to the client.
-            slot.set_state(models::state(Stage::Loading), &output);
-            let _turn = gate
-                .as_ref()
-                .map(|gate| gate.lock().unwrap_or_else(PoisonError::into_inner));
-            load(&model, &folder).map_err(|error| format!("{name} couldn't be loaded: {error}"))
-        })();
-        match prepared {
-            Ok(loaded) => {
-                let _ = slot.ready.set(loaded);
-                slot.set_state(models::state(Stage::Ready), &output);
-            }
-            Err(why) => slot.set_state(models::failed(why), &output),
+    let model = slot.model;
+    let name = model.name;
+    let prepared = (|| {
+        let models_dir = models_dir.ok_or_else(|| {
+            format!("there is no models folder: start {NAME} with --models <folder>")
+        })?;
+        let folder = if models::is_ready(&model, &models_dir) {
+            models::folder(&model, &models_dir)
+        } else if let Some(from) = &from {
+            download(&slot, &models_dir, from, output)?
+        } else {
+            return Err(format!(
+                "{name} isn't in {}, and {NAME} was started --offline",
+                models_dir.display()
+            ));
+        };
+        slot.set_state(models::state(Stage::Loading), output);
+        load(&model, &folder).map_err(|error| format!("{name} couldn't be loaded: {error}"))
+    })();
+    match prepared {
+        Ok(loaded) => {
+            let _ = slot.ready.set(loaded);
+            slot.set_state(models::state(Stage::Ready), output);
         }
-    });
+        Err(why) => slot.set_state(models::failed(why), output),
+    }
 }
 
 /// Downloads `slot`'s model into `models_dir` from `base_url`, reporting its progress at most once each
@@ -1119,63 +1136,47 @@ fn download<T: ?Sized>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
 
-    /// The most models loading at once, when two are prepared with `gate` (or none), each
-    /// load taking a moment.
-    fn most_loading_at_once(gate: Option<Arc<Mutex<()>>>) -> usize {
+    /// The most jobs running at once, and the order they started in, when three jobs that
+    /// each take a moment are run `one_at_a_time` or not.
+    fn run_three(one_at_a_time: bool) -> (usize, Vec<usize>) {
         use std::sync::atomic::AtomicUsize;
-        let dir = std::env::temp_dir().join(format!(
-            "audio-chat-box-gate-{}-{}",
-            std::process::id(),
-            gate.is_some()
-        ));
-        let models = [models::KOKORO, models::PARAKEET];
-        for model in &models {
-            let folder = models::folder(model, &dir);
-            fs::create_dir_all(&folder).unwrap();
-            fs::write(folder.join(model.model_file), "weights").unwrap();
-        }
-        let (loading, most) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
-        let output: Output = Arc::new(Mutex::new(Box::new(Written::default())));
-        let slots: Vec<Arc<Slot<u8>>> = models
-            .iter()
-            .map(|model| Arc::new(Slot::new(*model)))
-            .collect();
-        for slot in &slots {
-            let (loading, most) = (Arc::clone(&loading), Arc::clone(&most));
-            spawn_prepare(
-                Arc::clone(slot),
-                Some(dir.clone()),
-                None,
-                &output,
-                gate.clone(),
-                move |_: &LocalModel, _: &Path| {
-                    let now = loading.fetch_add(1, Ordering::SeqCst) + 1;
-                    most.fetch_max(now, Ordering::SeqCst);
-                    thread::sleep(Duration::from_millis(200));
-                    loading.fetch_sub(1, Ordering::SeqCst);
-                    Ok(Arc::new(1u8))
-                },
+        let (running, most) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let started = Arc::new(Mutex::new(Vec::new()));
+        let finished = Arc::new(AtomicUsize::new(0));
+        let job = |number: usize| -> Option<Preparation> {
+            let (running, most, started, finished) = (
+                Arc::clone(&running),
+                Arc::clone(&most),
+                Arc::clone(&started),
+                Arc::clone(&finished),
             );
-        }
+            Some(Box::new(move || {
+                started.lock().unwrap().push(number);
+                let now = running.fetch_add(1, Ordering::SeqCst) + 1;
+                most.fetch_max(now, Ordering::SeqCst);
+                thread::sleep(Duration::from_millis(100));
+                running.fetch_sub(1, Ordering::SeqCst);
+                finished.fetch_add(1, Ordering::SeqCst);
+            }))
+        };
+        run_jobs([job(0), job(1), job(2)], one_at_a_time);
         let deadline = Instant::now() + Duration::from_secs(10);
-        while slots.iter().any(|slot| slot.ready.get().is_none()) {
-            assert!(Instant::now() < deadline, "the models didn't load");
+        while finished.load(Ordering::SeqCst) < 3 {
+            assert!(Instant::now() < deadline, "the jobs didn't finish");
             thread::sleep(Duration::from_millis(10));
         }
-        let _ = fs::remove_dir_all(&dir);
-        most.load(Ordering::SeqCst)
+        let order = started.lock().unwrap().clone();
+        (most.load(Ordering::SeqCst), order)
     }
 
     #[test]
-    fn models_load_together_unless_asked_to_one_at_a_time() {
-        assert_eq!(most_loading_at_once(None), 2, "together is the default");
-        assert_eq!(
-            most_loading_at_once(Some(Arc::default())),
-            1,
-            "one at a time never overlaps"
-        );
+    fn models_are_prepared_together_unless_asked_to_one_at_a_time() {
+        let (most, _) = run_three(false);
+        assert!(most > 1, "together is the default: {most} at once");
+        let (most, order) = run_three(true);
+        assert_eq!(most, 1, "one at a time never overlaps");
+        assert_eq!(order, [0, 1, 2], "and keeps the order given");
     }
 
     /// What the node wrote, shared with the test.
